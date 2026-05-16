@@ -1,0 +1,4 @@
+module AVSpeechSynthesizerBridge {
+    header "AVSpeechSynthesizerBridge.h"
+    export *
+}
