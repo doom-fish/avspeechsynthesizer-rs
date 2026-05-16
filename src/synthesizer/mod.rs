@@ -1,14 +1,20 @@
 use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::buffer_callback::{
+    CollectedBufferWriteEventKind, CollectedBufferWritePayload, SpeechAudioBuffer,
+};
 use crate::error::AvSpeechError;
 use crate::ffi;
-use crate::private::{error_from_status, json_cstring, parse_json_ptr, to_cstring};
+use crate::marker::{MarkerPayload, SpeechSynthesisMarker, TextRange};
+use crate::private::{
+    error_from_status, json_cstring, parse_json_ptr, string_from_ptr, to_cstring,
+};
 use crate::utterance::{SpeechUtterance, UtterancePayload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,45 +31,6 @@ impl SpeechBoundary {
             Self::Word => 1,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TextRange {
-    pub location: usize,
-    pub length: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SpeechSynthesisMarkerMark {
-    Phoneme,
-    Word,
-    Sentence,
-    Paragraph,
-    Bookmark,
-    Unknown(i64),
-}
-
-impl SpeechSynthesisMarkerMark {
-    #[must_use]
-    pub const fn from_raw(raw: i64) -> Self {
-        match raw {
-            0 => Self::Phoneme,
-            1 => Self::Word,
-            2 => Self::Sentence,
-            3 => Self::Paragraph,
-            4 => Self::Bookmark,
-            other => Self::Unknown(other),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SpeechSynthesisMarker {
-    pub mark: SpeechSynthesisMarkerMark,
-    pub byte_sample_offset: u64,
-    pub text_range: TextRange,
-    pub bookmark_name: Option<String>,
-    pub phoneme: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +69,8 @@ impl WrittenAudioFile {
 }
 
 type EventHandler = Box<dyn Fn(SpeechEvent) + Send + Sync + 'static>;
+type BufferHandler = Box<dyn FnMut(SpeechAudioBuffer) + Send + 'static>;
+type MarkerHandler = Box<dyn FnMut(Vec<SpeechSynthesisMarker>) + Send + 'static>;
 
 #[derive(Default)]
 struct EventHandlerBox {
@@ -141,21 +110,66 @@ impl EventHandlerBox {
     }
 }
 
+struct WriteCallbackBox {
+    buffer_handler: Mutex<BufferHandler>,
+    marker_handler: Option<Mutex<MarkerHandler>>,
+}
+
+impl WriteCallbackBox {
+    fn with_buffer<F>(callback: F) -> Self
+    where
+        F: FnMut(SpeechAudioBuffer) + Send + 'static,
+    {
+        Self {
+            buffer_handler: Mutex::new(Box::new(callback)),
+            marker_handler: None,
+        }
+    }
+
+    fn with_callbacks<F, G>(buffer_callback: F, marker_callback: G) -> Self
+    where
+        F: FnMut(SpeechAudioBuffer) + Send + 'static,
+        G: FnMut(Vec<SpeechSynthesisMarker>) + Send + 'static,
+    {
+        Self {
+            buffer_handler: Mutex::new(Box::new(buffer_callback)),
+            marker_handler: Some(Mutex::new(Box::new(marker_callback))),
+        }
+    }
+
+    fn lock_buffer_handler(&self) -> MutexGuard<'_, BufferHandler> {
+        match self.buffer_handler.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn lock_marker_handler(&self) -> Option<MutexGuard<'_, MarkerHandler>> {
+        self.marker_handler
+            .as_ref()
+            .map(|handler| match handler.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            })
+    }
+
+    fn dispatch_buffer(&self, buffer: SpeechAudioBuffer) {
+        let mut handler = self.lock_buffer_handler();
+        handler(buffer);
+    }
+
+    fn dispatch_markers(&self, markers: Vec<SpeechSynthesisMarker>) {
+        if let Some(mut handler) = self.lock_marker_handler() {
+            handler(markers);
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RangePayload {
     location: usize,
     length: usize,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MarkerPayload {
-    mark: i64,
-    byte_sample_offset: u64,
-    text_range: RangePayload,
-    bookmark_name: Option<String>,
-    phoneme: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,18 +197,6 @@ impl From<RangePayload> for TextRange {
     }
 }
 
-impl From<MarkerPayload> for SpeechSynthesisMarker {
-    fn from(payload: MarkerPayload) -> Self {
-        Self {
-            mark: SpeechSynthesisMarkerMark::from_raw(payload.mark),
-            byte_sample_offset: payload.byte_sample_offset,
-            text_range: payload.text_range.into(),
-            bookmark_name: payload.bookmark_name,
-            phoneme: payload.phoneme,
-        }
-    }
-}
-
 impl From<WriteResultPayload> for WrittenAudioFile {
     fn from(payload: WriteResultPayload) -> Self {
         Self {
@@ -213,8 +215,12 @@ impl Drop for SpeechSynthesizer {
     fn drop(&mut self) {
         if !self.token.is_null() {
             unsafe {
-                ffi::avs_synthesizer_set_event_handler(self.token, None, ptr::null_mut());
-                ffi::avs_synthesizer_release(self.token);
+                ffi::synthesizer::avs_synthesizer_set_event_handler(
+                    self.token,
+                    None,
+                    ptr::null_mut(),
+                );
+                ffi::synthesizer::avs_synthesizer_release(self.token);
             }
             self.token = ptr::null_mut();
         }
@@ -223,7 +229,7 @@ impl Drop for SpeechSynthesizer {
 
 impl SpeechSynthesizer {
     pub fn new() -> Result<Self, AvSpeechError> {
-        let token = unsafe { ffi::avs_synthesizer_new() };
+        let token = unsafe { ffi::synthesizer::avs_synthesizer_new() };
         if token.is_null() {
             return Err(AvSpeechError::Unknown(
                 "failed to allocate AVSpeechSynthesizer bridge".to_owned(),
@@ -235,6 +241,15 @@ impl SpeechSynthesizer {
         })
     }
 
+    pub fn available_voices_did_change_notification_name() -> Result<String, AvSpeechError> {
+        unsafe {
+            string_from_ptr(
+                ffi::synthesizer::avs_available_voices_did_change_notification_name(),
+                "available voices notification name",
+            )
+        }
+    }
+
     pub fn set_event_handler<F>(&mut self, callback: F)
     where
         F: Fn(SpeechEvent) + Send + Sync + 'static,
@@ -242,7 +257,7 @@ impl SpeechSynthesizer {
         self.callback.replace(callback);
         let callback_raw = Arc::as_ptr(&self.callback).cast::<c_void>().cast_mut();
         unsafe {
-            ffi::avs_synthesizer_set_event_handler(
+            ffi::synthesizer::avs_synthesizer_set_event_handler(
                 self.token,
                 Some(event_trampoline),
                 callback_raw,
@@ -253,7 +268,7 @@ impl SpeechSynthesizer {
     pub fn clear_event_handler(&mut self) {
         self.callback.clear();
         unsafe {
-            ffi::avs_synthesizer_set_event_handler(self.token, None, ptr::null_mut());
+            ffi::synthesizer::avs_synthesizer_set_event_handler(self.token, None, ptr::null_mut());
         }
     }
 
@@ -261,7 +276,11 @@ impl SpeechSynthesizer {
         let utterance_json = json_cstring(&UtterancePayload::from(utterance))?;
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status = unsafe {
-            ffi::avs_synthesizer_speak_json(self.token, utterance_json.as_ptr(), &mut err_msg)
+            ffi::synthesizer::avs_synthesizer_speak_json(
+                self.token,
+                utterance_json.as_ptr(),
+                &mut err_msg,
+            )
         };
         if status == ffi::status::OK {
             Ok(())
@@ -270,29 +289,97 @@ impl SpeechSynthesizer {
         }
     }
 
+    pub fn write_utterance_with_buffer_callback<F>(
+        &self,
+        utterance: &SpeechUtterance,
+        buffer_callback: F,
+    ) -> Result<(), AvSpeechError>
+    where
+        F: FnMut(SpeechAudioBuffer) + Send + 'static,
+    {
+        let callbacks = WriteCallbackBox::with_buffer(buffer_callback);
+        self.write_utterance_with_callback_box(utterance, &callbacks)
+    }
+
+    pub fn write_utterance_with_callbacks<F, G>(
+        &self,
+        utterance: &SpeechUtterance,
+        buffer_callback: F,
+        marker_callback: G,
+    ) -> Result<(), AvSpeechError>
+    where
+        F: FnMut(SpeechAudioBuffer) + Send + 'static,
+        G: FnMut(Vec<SpeechSynthesisMarker>) + Send + 'static,
+    {
+        let callbacks = WriteCallbackBox::with_callbacks(buffer_callback, marker_callback);
+        self.write_utterance_with_callback_box(utterance, &callbacks)
+    }
+
+    fn write_utterance_with_callback_box(
+        &self,
+        utterance: &SpeechUtterance,
+        callbacks: &WriteCallbackBox,
+    ) -> Result<(), AvSpeechError> {
+        let utterance_json = json_cstring(&UtterancePayload::from(utterance))?;
+        let mut result_json: *mut c_char = ptr::null_mut();
+        let mut err_msg: *mut c_char = ptr::null_mut();
+        let status = unsafe {
+            ffi::buffer_callback::avs_synthesizer_collect_buffers_json(
+                self.token,
+                utterance_json.as_ptr(),
+                &mut result_json,
+                &mut err_msg,
+            )
+        };
+        if status != ffi::status::OK {
+            return Err(unsafe { error_from_status(status, err_msg) });
+        }
+
+        let payload: CollectedBufferWritePayload =
+            unsafe { parse_json_ptr(result_json, "collected speech audio buffers") }?;
+        for event in payload.events {
+            match event.kind {
+                CollectedBufferWriteEventKind::Buffer => {
+                    if let Some(buffer) = event
+                        .buffer
+                        .and_then(|value| SpeechAudioBuffer::try_from(value).ok())
+                    {
+                        callbacks.dispatch_buffer(buffer);
+                    }
+                }
+                CollectedBufferWriteEventKind::MarkerBatch => {
+                    if let Some(marker_batch) = event.marker_batch {
+                        callbacks.dispatch_markers(marker_batch.into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn pause_speaking(&self, boundary: SpeechBoundary) -> bool {
-        unsafe { ffi::avs_synthesizer_pause(self.token, boundary.as_raw()) }
+        unsafe { ffi::synthesizer::avs_synthesizer_pause(self.token, boundary.as_raw()) }
     }
 
     #[must_use]
     pub fn stop_speaking(&self, boundary: SpeechBoundary) -> bool {
-        unsafe { ffi::avs_synthesizer_stop(self.token, boundary.as_raw()) }
+        unsafe { ffi::synthesizer::avs_synthesizer_stop(self.token, boundary.as_raw()) }
     }
 
     #[must_use]
     pub fn continue_speaking(&self) -> bool {
-        unsafe { ffi::avs_synthesizer_continue(self.token) }
+        unsafe { ffi::synthesizer::avs_synthesizer_continue(self.token) }
     }
 
     #[must_use]
     pub fn is_speaking(&self) -> bool {
-        unsafe { ffi::avs_synthesizer_is_speaking(self.token) }
+        unsafe { ffi::synthesizer::avs_synthesizer_is_speaking(self.token) }
     }
 
     #[must_use]
     pub fn is_paused(&self) -> bool {
-        unsafe { ffi::avs_synthesizer_is_paused(self.token) }
+        unsafe { ffi::synthesizer::avs_synthesizer_is_paused(self.token) }
     }
 
     pub fn write_utterance_to_file<P>(
@@ -311,7 +398,7 @@ impl SpeechSynthesizer {
         let mut result_json: *mut c_char = ptr::null_mut();
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status = unsafe {
-            ffi::avs_synthesizer_write_utterance_to_file_json(
+            ffi::synthesizer::avs_synthesizer_write_utterance_to_file_json(
                 self.token,
                 utterance_json.as_ptr(),
                 output_path.as_ptr(),
@@ -330,7 +417,7 @@ impl SpeechSynthesizer {
 
     pub fn pump_run_loop(&self, duration: Duration) {
         unsafe {
-            ffi::avs_run_loop_pump(duration.as_secs_f64());
+            ffi::synthesizer::avs_run_loop_pump(duration.as_secs_f64());
         }
     }
 }
@@ -347,8 +434,10 @@ unsafe extern "C" fn event_trampoline(user_info: *mut c_void, payload_json: *con
     let Ok(raw) = serde_json::from_str::<EventPayload>(payload) else {
         return;
     };
+    let Ok(utterance) = SpeechUtterance::try_from(raw.utterance) else {
+        return;
+    };
 
-    let utterance = SpeechUtterance::from(raw.utterance);
     let event = match raw.event.as_str() {
         "didStart" => SpeechEvent::DidStart(utterance),
         "didFinish" => SpeechEvent::DidFinish(utterance),

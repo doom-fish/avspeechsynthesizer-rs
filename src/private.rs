@@ -20,6 +20,12 @@ pub fn json_cstring<T: Serialize>(value: &T) -> Result<CString, AvSpeechError> {
     to_cstring(&json)
 }
 
+pub fn parse_json_str<T: DeserializeOwned>(json: &str, context: &str) -> Result<T, AvSpeechError> {
+    serde_json::from_str(json).map_err(|error| {
+        AvSpeechError::Unknown(format!("failed to decode {context} JSON payload: {error}"))
+    })
+}
+
 pub unsafe fn take_optional_string(ptr: *mut c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
@@ -40,9 +46,7 @@ pub unsafe fn parse_json_ptr<T: DeserializeOwned>(
     context: &str,
 ) -> Result<T, AvSpeechError> {
     let json = string_from_ptr(ptr, context)?;
-    serde_json::from_str(&json).map_err(|error| {
-        AvSpeechError::Unknown(format!("failed to decode {context} JSON payload: {error}"))
-    })
+    parse_json_str(&json, context)
 }
 
 pub unsafe fn optional_json_from_ptr<T: DeserializeOwned>(
@@ -57,6 +61,14 @@ pub unsafe fn optional_json_from_ptr<T: DeserializeOwned>(
         return Ok(None);
     }
     parse_json_ptr(ptr, context).map(Some)
+}
+
+pub unsafe fn result_from_status(status: i32, err_msg: *mut c_char) -> Result<(), AvSpeechError> {
+    if status == ffi::status::OK {
+        Ok(())
+    } else {
+        Err(error_from_status(status, err_msg))
+    }
 }
 
 pub unsafe fn error_from_status(status: i32, err_msg: *mut c_char) -> AvSpeechError {

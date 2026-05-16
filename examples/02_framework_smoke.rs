@@ -7,6 +7,10 @@ use avspeechsynthesizer::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== AVSpeechSynthesizer.framework smoke ==");
+    println!(
+        "voices notification name: {}",
+        SpeechSynthesizer::available_voices_did_change_notification_name()?
+    );
 
     let current_language = SpeechSynthesisVoice::current_language_code()?;
     println!("current language: {current_language}");
@@ -15,17 +19,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("en-US voices: {}", en_us_voices.len());
     for voice in en_us_voices.iter().take(5) {
         println!(
-            "voice: {} [{}] id={} quality={:?}",
+            "voice: {} [{}] id={} quality={:?} traits={:?}",
             voice.name(),
             voice.language(),
             voice.identifier(),
             voice.quality(),
+            voice.voice_traits(),
         );
     }
 
-    let default_voice = SpeechSynthesisVoice::voice_with_language("en-US")?;
+    let default_voice = SpeechSynthesisVoice::default_voice()?;
     println!(
-        "default en-US voice: {}",
+        "default voice: {}",
         default_voice.as_ref().map_or_else(
             || "<system default>".to_owned(),
             |voice| format!("{} ({})", voice.name(), voice.identifier()),
@@ -46,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     synthesizer.speak(&utterance)?;
 
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut saw_start = false;
     let mut saw_finish = false;
     while Instant::now() < deadline {

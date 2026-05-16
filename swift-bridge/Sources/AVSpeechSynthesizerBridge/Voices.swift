@@ -45,7 +45,7 @@ public func avs_voice_with_language_json(
     _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> UnsafeMutablePointer<CChar>? {
     do {
-        let requestedLanguage = try avsRequireString(language, field: "language")
+        let requestedLanguage = language.map { String(cString: $0) }
         guard let voice = AVSpeechSynthesisVoice(language: requestedLanguage) else {
             return nil
         }
@@ -77,4 +77,9 @@ public func avs_voice_with_identifier_json(
         outErrorMessage?.pointee = avsCString(error.localizedDescription)
         return nil
     }
+}
+
+@_cdecl("avs_alex_voice_identifier")
+public func avs_alex_voice_identifier() -> UnsafeMutablePointer<CChar>? {
+    avsCString(AVSpeechSynthesisVoiceIdentifierAlex)
 }

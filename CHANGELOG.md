@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2026-05-16
+
+### Added
+
+- Completed the AVSpeech safe wrapper surface across seven logical areas: synthesizer, utterance, voice, buffer callbacks, markers, provider models, and personal voice authorization.
+- Added attributed-string and SSML `SpeechUtterance` construction plus assistive-technology preference coverage.
+- Added `SpeechSynthesisVoice` audio-file settings, Alex identifier lookup, and voice trait inspection.
+- Added `SpeechSynthesizer::write_utterance_with_buffer_callback` and `write_utterance_with_callbacks` for offline buffer collection.
+- Added `SpeechSynthesisMarker` constructors for generic, word, sentence, paragraph, phoneme, and bookmark markers.
+- Added `SpeechSynthesisProviderVoice` and `SpeechSynthesisProviderRequest` wrappers for provider-side AVSpeech models.
+- Added personal-voice authorization helpers and `available_personal_voices()`.
+- Added seven numbered examples and one test file per logical area.
+- Added `COVERAGE.md` with the SDK-by-SDK audit and deferred extension-only / macOS-unavailable rows.
+
 ## [0.1.0] - 2026-05-16
 
 ### Added

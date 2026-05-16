@@ -1,3 +1,4 @@
+// swiftlint:disable identifier_name
 import AVFAudio
 import Foundation
 
@@ -8,6 +9,8 @@ let AVS_TIMED_OUT: Int32 = -3
 let AVS_IO_ERROR: Int32 = -4
 let AVS_FRAMEWORK_ERROR: Int32 = -5
 let AVS_UNKNOWN: Int32 = -99
+
+public typealias AVSJSONCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
 
 @_cdecl("avs_string_free")
 public func avs_string_free(_ string: UnsafeMutablePointer<CChar>?) {
@@ -33,26 +36,6 @@ func avsBorrow<T: AnyObject>(_ ptr: UnsafeMutableRawPointer, as type: T.Type = T
 @inline(__always)
 func avsRelease(_ ptr: UnsafeMutableRawPointer) {
     Unmanaged<AnyObject>.fromOpaque(ptr).release()
-}
-
-public func avs_block_on_async(
-    timeoutSeconds: Int = 30,
-    work: @escaping () async throws -> Void
-) -> Int32 {
-    let semaphore = DispatchSemaphore(value: 0)
-    var status = AVS_OK
-    Task {
-        do {
-            try await work()
-        } catch {
-            status = AVS_FRAMEWORK_ERROR
-        }
-        semaphore.signal()
-    }
-    if semaphore.wait(timeout: .now() + .seconds(timeoutSeconds)) == .timedOut {
-        return AVS_TIMED_OUT
-    }
-    return status
 }
 
 enum AVSBridgeError: Error, CustomStringConvertible {
@@ -121,6 +104,53 @@ func avsRequireString(_ cString: UnsafePointer<CChar>?, field: String) throws ->
     return String(cString: cString)
 }
 
+func avsJSONString(fromJSONObject object: Any) throws -> String {
+    guard JSONSerialization.isValidJSONObject(object) else {
+        throw AVSBridgeError.invalidArgument("object is not JSON serializable")
+    }
+    let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    guard let string = String(data: data, encoding: .utf8) else {
+        throw AVSBridgeError.unknown("failed to encode Foundation object as UTF-8 JSON")
+    }
+    return string
+}
+
+func avsJSONObject(from json: String) throws -> Any {
+    let data = Data(json.utf8)
+    return try JSONSerialization.jsonObject(with: data)
+}
+
+func avsJSONObjectDictionary(from json: String, field: String) throws -> [String: Any] {
+    guard let dictionary = try avsJSONObject(from: json) as? [String: Any] else {
+        throw AVSBridgeError.invalidArgument("\(field) JSON must decode to an object")
+    }
+    return dictionary
+}
+
+func avsEmitJSON<T: Encodable>(
+    _ callback: AVSJSONCallback?,
+    userInfo: UnsafeMutableRawPointer?,
+    payload: T
+) {
+    guard let callback else { return }
+    guard let json = try? avsEncodeJSON(payload) else {
+        callback(userInfo, nil)
+        return
+    }
+    json.withCString { callback(userInfo, $0) }
+}
+
+func avsWaitForSignal(_ semaphore: DispatchSemaphore, timeoutSeconds: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+        if semaphore.wait(timeout: .now()) == .success {
+            return true
+        }
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
+    }
+    return false
+}
+
 func avsNormalizedLanguage(_ language: String) -> String {
     language.replacingOccurrences(of: "_", with: "-").lowercased()
 }
@@ -131,16 +161,49 @@ struct AVSVoicePayload: Codable {
     var name: String
     var quality: Int
     var gender: Int?
+    var audioFileSettingsJson: String?
+    var voiceTraits: UInt64?
 }
 
-struct AVSUtterancePayload: Codable {
-    var speechString: String
-    var voice: AVSVoicePayload?
-    var rate: Float
-    var pitchMultiplier: Float
-    var volume: Float
-    var preUtteranceDelay: Double
-    var postUtteranceDelay: Double
+func avsVoicePayload(from voice: AVSpeechSynthesisVoice) -> AVSVoicePayload {
+    let gender: Int?
+    if #available(macOS 10.15, *) {
+        gender = Int(voice.gender.rawValue)
+    } else {
+        gender = nil
+    }
+
+    let voiceTraits: UInt64?
+    if #available(macOS 14.0, *) {
+        voiceTraits = UInt64(voice.voiceTraits.rawValue)
+    } else {
+        voiceTraits = nil
+    }
+
+    let audioFileSettingsJson = try? avsJSONString(fromJSONObject: voice.audioFileSettings)
+
+    return AVSVoicePayload(
+        language: voice.language,
+        identifier: voice.identifier,
+        name: voice.name,
+        quality: Int(voice.quality.rawValue),
+        gender: gender,
+        audioFileSettingsJson: audioFileSettingsJson,
+        voiceTraits: voiceTraits
+    )
+}
+
+func avsVoice(from payload: AVSVoicePayload?) -> AVSpeechSynthesisVoice? {
+    guard let payload else { return nil }
+    if !payload.identifier.isEmpty,
+       let byIdentifier = AVSpeechSynthesisVoice(identifier: payload.identifier)
+    {
+        return byIdentifier
+    }
+    if payload.language.isEmpty {
+        return AVSpeechSynthesisVoice(language: nil)
+    }
+    return AVSpeechSynthesisVoice(language: payload.language)
 }
 
 struct AVSRangePayload: Codable {
@@ -154,67 +217,6 @@ struct AVSMarkerPayload: Codable {
     var textRange: AVSRangePayload
     var bookmarkName: String?
     var phoneme: String?
-}
-
-struct AVSEventPayload: Codable {
-    var event: String
-    var utterance: AVSUtterancePayload
-    var characterRange: AVSRangePayload?
-    var marker: AVSMarkerPayload?
-}
-
-struct AVSWriteResultPayload: Codable {
-    var outputPath: String
-    var markers: [AVSMarkerPayload]
-}
-
-func avsVoicePayload(from voice: AVSpeechSynthesisVoice) -> AVSVoicePayload {
-    let gender: Int?
-    if #available(macOS 10.15, *) {
-        gender = Int(voice.gender.rawValue)
-    } else {
-        gender = nil
-    }
-    return AVSVoicePayload(
-        language: voice.language,
-        identifier: voice.identifier,
-        name: voice.name,
-        quality: Int(voice.quality.rawValue),
-        gender: gender
-    )
-}
-
-func avsVoice(from payload: AVSVoicePayload?) -> AVSpeechSynthesisVoice? {
-    guard let payload else { return nil }
-    if !payload.identifier.isEmpty,
-       let byIdentifier = AVSpeechSynthesisVoice(identifier: payload.identifier)
-    {
-        return byIdentifier
-    }
-    return AVSpeechSynthesisVoice(language: payload.language)
-}
-
-func avsUtterance(from payload: AVSUtterancePayload) -> AVSpeechUtterance {
-    let utterance = AVSpeechUtterance(string: payload.speechString)
-    utterance.voice = avsVoice(from: payload.voice)
-    utterance.rate = payload.rate
-    utterance.pitchMultiplier = payload.pitchMultiplier
-    utterance.volume = payload.volume
-    utterance.preUtteranceDelay = payload.preUtteranceDelay
-    utterance.postUtteranceDelay = payload.postUtteranceDelay
-    return utterance
-}
-
-func avsUtterancePayload(from utterance: AVSpeechUtterance) -> AVSUtterancePayload {
-    AVSUtterancePayload(
-        speechString: utterance.speechString,
-        voice: utterance.voice.map(avsVoicePayload),
-        rate: utterance.rate,
-        pitchMultiplier: utterance.pitchMultiplier,
-        volume: utterance.volume,
-        preUtteranceDelay: utterance.preUtteranceDelay,
-        postUtteranceDelay: utterance.postUtteranceDelay
-    )
 }
 
 func avsRangePayload(from range: NSRange) -> AVSRangePayload {
@@ -238,4 +240,57 @@ func avsMarkerPayload(from marker: AVSpeechSynthesisMarker) -> AVSMarkerPayload 
         bookmarkName: bookmarkName,
         phoneme: phoneme
     )
+}
+
+struct AVSEventPayload: Codable {
+    var event: String
+    var utterance: AVSUtterancePayload
+    var characterRange: AVSRangePayload?
+    var marker: AVSMarkerPayload?
+}
+
+struct AVSWriteResultPayload: Codable {
+    var outputPath: String
+    var markers: [AVSMarkerPayload]
+}
+
+struct AVSAudioBufferPayload: Codable {
+    var sampleRate: Double
+    var channelCount: Int
+    var frameLength: Int
+    var commonFormat: String
+    var isInterleaved: Bool
+    var planesBase64: [String]
+    var audioFileSettingsJson: String?
+    var isEndOfStream: Bool
+}
+
+struct AVSMarkerBatchPayload: Codable {
+    var markers: [AVSMarkerPayload]
+}
+
+enum AVSCollectedBufferWriteEventKind: String, Codable {
+    case buffer
+    case markerBatch
+}
+
+struct AVSCollectedBufferWriteEvent: Codable {
+    var kind: AVSCollectedBufferWriteEventKind
+    var buffer: AVSAudioBufferPayload?
+    var markerBatch: AVSMarkerBatchPayload?
+}
+
+struct AVSCollectedBufferWritePayload: Codable {
+    var events: [AVSCollectedBufferWriteEvent]
+}
+
+struct AVSProviderVoicePayload: Codable {
+    var name: String
+    var identifier: String
+    var primaryLanguages: [String]
+    var supportedLanguages: [String]
+    var voiceSize: Int64
+    var version: String
+    var gender: Int
+    var age: Int
 }

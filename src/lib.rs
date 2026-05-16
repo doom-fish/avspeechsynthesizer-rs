@@ -7,29 +7,51 @@
     clippy::module_name_repetitions
 )]
 
+pub mod buffer_callback;
 pub mod error;
 pub mod ffi;
+pub mod marker;
+pub mod personal_voice;
 mod private;
+pub mod provider;
 pub mod synthesizer;
 pub mod utterance;
 pub mod voice;
 
+pub use buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
 pub use error::AvSpeechError;
-pub use synthesizer::{
-    SpeechBoundary, SpeechEvent, SpeechSynthesisMarker, SpeechSynthesisMarkerMark,
-    SpeechSynthesizer, TextRange, WrittenAudioFile,
+pub use marker::{SpeechSynthesisMarker, SpeechSynthesisMarkerMark, TextRange};
+pub use personal_voice::{
+    available_personal_voices, personal_voice_authorization_status,
+    request_personal_voice_authorization, PersonalVoiceAuthorizationStatus,
 };
-pub use utterance::SpeechUtterance;
-pub use voice::{SpeechSynthesisVoice, SpeechSynthesisVoiceGender, SpeechSynthesisVoiceQuality};
+pub use provider::{SpeechSynthesisProviderRequest, SpeechSynthesisProviderVoice};
+pub use synthesizer::{SpeechBoundary, SpeechEvent, SpeechSynthesizer, WrittenAudioFile};
+pub use utterance::{
+    AttributedSpeechString, SpeechAttributeRun, SpeechUtterance, SpeechUtteranceKind,
+};
+pub use voice::{
+    SpeechSynthesisVoice, SpeechSynthesisVoiceGender, SpeechSynthesisVoiceQuality,
+    SpeechSynthesisVoiceTraits,
+};
 
 pub mod prelude {
+    pub use crate::buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
     pub use crate::error::AvSpeechError;
-    pub use crate::synthesizer::{
-        SpeechBoundary, SpeechEvent, SpeechSynthesisMarker, SpeechSynthesisMarkerMark,
-        SpeechSynthesizer, TextRange, WrittenAudioFile,
+    pub use crate::marker::{SpeechSynthesisMarker, SpeechSynthesisMarkerMark, TextRange};
+    pub use crate::personal_voice::{
+        available_personal_voices, personal_voice_authorization_status,
+        request_personal_voice_authorization, PersonalVoiceAuthorizationStatus,
     };
-    pub use crate::utterance::SpeechUtterance;
+    pub use crate::provider::{SpeechSynthesisProviderRequest, SpeechSynthesisProviderVoice};
+    pub use crate::synthesizer::{
+        SpeechBoundary, SpeechEvent, SpeechSynthesizer, WrittenAudioFile,
+    };
+    pub use crate::utterance::{
+        AttributedSpeechString, SpeechAttributeRun, SpeechUtterance, SpeechUtteranceKind,
+    };
     pub use crate::voice::{
         SpeechSynthesisVoice, SpeechSynthesisVoiceGender, SpeechSynthesisVoiceQuality,
+        SpeechSynthesisVoiceTraits,
     };
 }

@@ -1,24 +1,18 @@
 import AVFAudio
 import Foundation
 
-public typealias AVSEventCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
-
 final class AVSRustSpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
-    let callback: AVSEventCallback
+    let callback: AVSJSONCallback
     let userInfo: UnsafeMutableRawPointer?
 
-    init(callback: @escaping AVSEventCallback, userInfo: UnsafeMutableRawPointer?) {
+    init(callback: @escaping AVSJSONCallback, userInfo: UnsafeMutableRawPointer?) {
         self.callback = callback
         self.userInfo = userInfo
         super.init()
     }
 
     private func emit(_ payload: AVSEventPayload) {
-        guard let json = try? avsEncodeJSON(payload) else {
-            callback(userInfo, nil)
-            return
-        }
-        json.withCString { callback(userInfo, $0) }
+        avsEmitJSON(callback, userInfo: userInfo, payload: payload)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
@@ -97,11 +91,13 @@ final class AVSRustSpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
     }
 }
 
+extension AVSRustSpeechDelegate: @unchecked Sendable {}
+
 final class AVSSynthesizerBox: NSObject {
     let synthesizer = AVSpeechSynthesizer()
     var delegateBox: AVSRustSpeechDelegate?
 
-    func setEventHandler(callback: AVSEventCallback?, userInfo: UnsafeMutableRawPointer?) {
+    func setEventHandler(callback: AVSJSONCallback?, userInfo: UnsafeMutableRawPointer?) {
         guard let callback else {
             synthesizer.delegate = nil
             delegateBox = nil
@@ -138,7 +134,7 @@ public func avs_synthesizer_release(_ token: UnsafeMutableRawPointer?) {
 @_cdecl("avs_synthesizer_set_event_handler")
 public func avs_synthesizer_set_event_handler(
     _ token: UnsafeMutableRawPointer?,
-    _ callback: AVSEventCallback?,
+    _ callback: AVSJSONCallback?,
     _ userInfo: UnsafeMutableRawPointer?
 ) {
     guard let token else { return }
@@ -169,7 +165,7 @@ public func avs_synthesizer_speak_json(
     do {
         let box = try avsSynthesizerBox(token)
         let payload = try avsDecodeJSON(utteranceJson, as: AVSUtterancePayload.self)
-        box.synthesizer.speak(avsUtterance(from: payload))
+        box.synthesizer.speak(try avsUtterance(from: payload))
         return AVS_OK
     } catch let error as AVSBridgeError {
         outErrorMessage?.pointee = avsCString(error.description)
@@ -199,6 +195,14 @@ public func avs_synthesizer_continue(_ token: UnsafeMutableRawPointer?) -> Bool 
     guard let token else { return false }
     let box: AVSSynthesizerBox = avsBorrow(token)
     return box.synthesizer.continueSpeaking()
+}
+
+@_cdecl("avs_available_voices_did_change_notification_name")
+public func avs_available_voices_did_change_notification_name() -> UnsafeMutablePointer<CChar>? {
+    if #available(macOS 14.0, *) {
+        return avsCString(AVSpeechSynthesizer.availableVoicesDidChangeNotification.rawValue)
+    }
+    return avsCString("AVSpeechSynthesisAvailableVoicesDidChangeNotification")
 }
 
 @_cdecl("avs_run_loop_pump")

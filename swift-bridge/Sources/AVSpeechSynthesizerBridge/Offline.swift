@@ -1,3 +1,4 @@
+// swiftlint:disable function_body_length cyclomatic_complexity
 import AVFAudio
 import Foundation
 
@@ -17,7 +18,7 @@ private func avsWriteUtterance(
         }
     }
 
-    let utterance = avsUtterance(from: payload)
+    let utterance = try avsUtterance(from: payload)
     let semaphore = DispatchSemaphore(value: 0)
     var audioFile: AVAudioFile?
     var capturedError: Error?
@@ -54,15 +55,11 @@ private func avsWriteUtterance(
         }
     }
 
-    if #available(macOS 13.0, *) {
-        box.synthesizer.write(utterance, toBufferCallback: bufferCallback) { emittedMarkers in
-            markers.append(contentsOf: emittedMarkers)
-        }
-    } else {
-        box.synthesizer.write(utterance, toBufferCallback: bufferCallback)
+    box.synthesizer.write(utterance, toBufferCallback: bufferCallback) { emittedMarkers in
+        markers.append(contentsOf: emittedMarkers)
     }
 
-    if semaphore.wait(timeout: .now() + .seconds(120)) == .timedOut {
+    if !avsWaitForSignal(semaphore, timeoutSeconds: 120) {
         throw AVSBridgeError.timedOut("offline synthesis timed out after 120 seconds")
     }
     if let capturedError {

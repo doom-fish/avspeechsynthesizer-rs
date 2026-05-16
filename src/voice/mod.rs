@@ -1,10 +1,14 @@
 use core::ptr;
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::AvSpeechError;
 use crate::ffi;
-use crate::private::{optional_json_from_ptr, parse_json_ptr, string_from_ptr, to_cstring};
+use crate::private::{
+    optional_json_from_ptr, parse_json_ptr, parse_json_str, string_from_ptr, to_cstring,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpeechSynthesisVoiceQuality {
@@ -66,6 +70,63 @@ impl SpeechSynthesisVoiceGender {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SpeechSynthesisVoiceTraits(u64);
+
+impl SpeechSynthesisVoiceTraits {
+    pub const NONE: Self = Self(0);
+    pub const IS_NOVELTY_VOICE: Self = Self(1 << 0);
+    pub const IS_PERSONAL_VOICE: Self = Self(1 << 1);
+
+    #[must_use]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl BitOr for SpeechSynthesisVoiceTraits {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for SpeechSynthesisVoiceTraits {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl BitAnd for SpeechSynthesisVoiceTraits {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitAndAssign for SpeechSynthesisVoiceTraits {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SpeechSynthesisVoice {
     language: String,
@@ -73,6 +134,8 @@ pub struct SpeechSynthesisVoice {
     name: String,
     quality: SpeechSynthesisVoiceQuality,
     gender: Option<SpeechSynthesisVoiceGender>,
+    audio_file_settings_json: Option<String>,
+    voice_traits: SpeechSynthesisVoiceTraits,
 }
 
 impl SpeechSynthesisVoice {
@@ -101,9 +164,31 @@ impl SpeechSynthesisVoice {
         self.gender
     }
 
+    #[must_use]
+    pub fn audio_file_settings_json(&self) -> Option<&str> {
+        self.audio_file_settings_json.as_deref()
+    }
+
+    pub fn audio_file_settings(&self) -> Result<Option<Value>, AvSpeechError> {
+        self.audio_file_settings_json
+            .as_deref()
+            .map(|json| parse_json_str(json, "speech synthesis voice audio file settings"))
+            .transpose()
+    }
+
+    #[must_use]
+    pub const fn traits(&self) -> SpeechSynthesisVoiceTraits {
+        self.voice_traits
+    }
+
+    #[must_use]
+    pub const fn voice_traits(&self) -> SpeechSynthesisVoiceTraits {
+        self.voice_traits
+    }
+
     pub fn speech_voices() -> Result<Vec<Self>, AvSpeechError> {
         let payloads: Vec<VoicePayload> =
-            unsafe { parse_json_ptr(ffi::avs_speech_voices_json(), "speech voices") }?;
+            unsafe { parse_json_ptr(ffi::voice::avs_speech_voices_json(), "speech voices") }?;
         Ok(payloads.into_iter().map(Into::into).collect())
     }
 
@@ -112,7 +197,7 @@ impl SpeechSynthesisVoice {
         let mut err_msg = ptr::null_mut();
         let payloads = unsafe {
             optional_json_from_ptr::<Vec<VoicePayload>>(
-                ffi::avs_voices_with_language_json(language.as_ptr(), &mut err_msg),
+                ffi::voice::avs_voices_with_language_json(language.as_ptr(), &mut err_msg),
                 err_msg,
                 "voices with language",
             )?
@@ -124,12 +209,27 @@ impl SpeechSynthesisVoice {
             .collect())
     }
 
+    pub fn default_voice() -> Result<Option<Self>, AvSpeechError> {
+        Self::voice_with_optional_language(None)
+    }
+
     pub fn voice_with_language(language: &str) -> Result<Option<Self>, AvSpeechError> {
-        let language = to_cstring(language)?;
+        Self::voice_with_optional_language(Some(language))
+    }
+
+    pub fn voice_with_optional_language(
+        language: Option<&str>,
+    ) -> Result<Option<Self>, AvSpeechError> {
         let mut err_msg = ptr::null_mut();
+        let language = language.map(to_cstring).transpose()?;
         let payload = unsafe {
             optional_json_from_ptr::<VoicePayload>(
-                ffi::avs_voice_with_language_json(language.as_ptr(), &mut err_msg),
+                ffi::voice::avs_voice_with_language_json(
+                    language
+                        .as_ref()
+                        .map_or(ptr::null(), |value| value.as_ptr()),
+                    &mut err_msg,
+                ),
                 err_msg,
                 "voice with language",
             )?
@@ -142,7 +242,7 @@ impl SpeechSynthesisVoice {
         let mut err_msg = ptr::null_mut();
         let payload = unsafe {
             optional_json_from_ptr::<VoicePayload>(
-                ffi::avs_voice_with_identifier_json(identifier.as_ptr(), &mut err_msg),
+                ffi::voice::avs_voice_with_identifier_json(identifier.as_ptr(), &mut err_msg),
                 err_msg,
                 "voice with identifier",
             )?
@@ -151,7 +251,21 @@ impl SpeechSynthesisVoice {
     }
 
     pub fn current_language_code() -> Result<String, AvSpeechError> {
-        unsafe { string_from_ptr(ffi::avs_current_language_code(), "current language code") }
+        unsafe {
+            string_from_ptr(
+                ffi::voice::avs_current_language_code(),
+                "current language code",
+            )
+        }
+    }
+
+    pub fn alex_identifier() -> Result<String, AvSpeechError> {
+        unsafe {
+            string_from_ptr(
+                ffi::voice::avs_alex_voice_identifier(),
+                "Alex voice identifier",
+            )
+        }
     }
 }
 
@@ -163,6 +277,10 @@ pub(crate) struct VoicePayload {
     name: String,
     quality: i64,
     gender: Option<i64>,
+    #[serde(default)]
+    audio_file_settings_json: Option<String>,
+    #[serde(default)]
+    voice_traits: Option<u64>,
 }
 
 impl From<VoicePayload> for SpeechSynthesisVoice {
@@ -173,6 +291,8 @@ impl From<VoicePayload> for SpeechSynthesisVoice {
             name: payload.name,
             quality: SpeechSynthesisVoiceQuality::from_raw(payload.quality),
             gender: payload.gender.map(SpeechSynthesisVoiceGender::from_raw),
+            audio_file_settings_json: payload.audio_file_settings_json,
+            voice_traits: SpeechSynthesisVoiceTraits::from_bits(payload.voice_traits.unwrap_or(0)),
         }
     }
 }
@@ -185,6 +305,8 @@ impl From<&SpeechSynthesisVoice> for VoicePayload {
             name: voice.name.clone(),
             quality: voice.quality.as_raw(),
             gender: voice.gender.map(SpeechSynthesisVoiceGender::as_raw),
+            audio_file_settings_json: voice.audio_file_settings_json.clone(),
+            voice_traits: Some(voice.voice_traits.bits()),
         }
     }
 }
