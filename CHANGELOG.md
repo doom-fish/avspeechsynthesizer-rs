@@ -1,5 +1,23 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+## [0.3.0] — 2024-05-17
+
+### Added
+
+- **Async API (Tier 2 Stream)** — New `async_api` module (gated behind `async` feature) providing executor-agnostic async event streams
+  - `SpeechSynthesisEventStream` wraps delegate callbacks as a `BoundedAsyncStream<SpeechSynthesisEvent>`
+  - `SpeechSynthesisEvent` enum covers all delegate events: `DidStart`, `DidFinish`, `DidPause`, `DidContinue`, `DidCancel`, `WillSpeakRange`, `WillSpeakMarker`
+  - Example: `examples/08_async_events.rs` demonstrates event listening with `pollster::block_on`
+  - Tests: `tests/async_stream_tests.rs` covers subscribe/unsubscribe, event flow, buffering, and state checks
+- New `async` Cargo feature flag; new optional dependency on `doom-fish-utils`
+- New dev-dependency: `pollster = "0.3"` for examples
+
+### Changed
+
+- Bumped minor version (0.2 → 0.3) for new public module and feature
+
 ## [0.2.0] - 2026-05-16
 
 ### Added

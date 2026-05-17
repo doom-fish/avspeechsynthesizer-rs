@@ -18,6 +18,10 @@ pub mod synthesizer;
 pub mod utterance;
 pub mod voice;
 
+#[cfg(feature = "async")]
+#[cfg_attr(docsrs, doc(cfg(feature = "async")))]
+pub mod async_api;
+
 pub use buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
 pub use error::AvSpeechError;
 pub use marker::{SpeechSynthesisMarker, SpeechSynthesisMarkerMark, TextRange};

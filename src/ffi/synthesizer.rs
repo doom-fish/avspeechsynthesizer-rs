@@ -2,6 +2,9 @@ use core::ffi::{c_char, c_void};
 
 use super::AVSEventCallback;
 
+pub type AVSAsyncStreamCallback =
+    unsafe extern "C" fn(kind: i32, payload: *mut c_void, ctx: *mut c_void);
+
 extern "C" {
     pub fn avs_synthesizer_new() -> *mut c_void;
     pub fn avs_synthesizer_release(token: *mut c_void);
@@ -29,4 +32,10 @@ extern "C" {
     ) -> i32;
     pub fn avs_available_voices_did_change_notification_name() -> *mut c_char;
     pub fn avs_run_loop_pump(seconds: f64);
+    pub fn avs_synthesis_event_subscribe(
+        token: *mut c_void,
+        on_event: AVSAsyncStreamCallback,
+        ctx: *mut c_void,
+    ) -> *mut c_void;
+    pub fn avs_synthesis_event_unsubscribe(handle: *mut c_void);
 }

@@ -382,6 +382,11 @@ impl SpeechSynthesizer {
         unsafe { ffi::synthesizer::avs_synthesizer_is_paused(self.token) }
     }
 
+    #[must_use]
+    pub(crate) fn as_raw(&self) -> *mut c_void {
+        self.token
+    }
+
     pub fn write_utterance_to_file<P>(
         &self,
         utterance: &SpeechUtterance,
