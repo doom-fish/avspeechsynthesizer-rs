@@ -50,6 +50,7 @@
 use crate::ffi::synthesizer::{avs_synthesis_event_subscribe, avs_synthesis_event_unsubscribe};
 use crate::marker::{SpeechSynthesisMarker, TextRange};
 use crate::utterance::SpeechUtterance;
+use doom_fish_utils::panic_safe::catch_user_panic;
 use doom_fish_utils::stream::{AsyncStreamSender, BoundedAsyncStream};
 use std::convert::TryFrom;
 use std::ffi::c_void;
@@ -85,6 +86,8 @@ struct SubscriptionHandle(*mut c_void);
 impl Drop for SubscriptionHandle {
     fn drop(&mut self) {
         if !self.0.is_null() {
+            // SAFETY: `self.0` is a valid handle returned by `avs_synthesis_event_subscribe`
+            // and is being freed exactly once (guaranteed by Drop semantics).
             unsafe { avs_synthesis_event_unsubscribe(self.0) };
         }
     }
@@ -95,9 +98,8 @@ unsafe impl Sync for SubscriptionHandle {}
 
 /// Async stream of speech synthesis events
 ///
-/// Wraps [`BoundedAsyncStream`](doom_fish_utils::stream::BoundedAsyncStream) to provide
-/// event stream iteration over speech synthesis events. When this stream is dropped,
-/// the underlying subscription is automatically cleaned up.
+/// Wraps [`BoundedAsyncStream`] to provide event stream iteration over speech synthesis
+/// events. When this stream is dropped, the underlying subscription is automatically cleaned up.
 pub struct SpeechSynthesisEventStream {
     inner: BoundedAsyncStream<SpeechSynthesisEvent>,
     _handle: SubscriptionHandle,
@@ -122,6 +124,8 @@ impl SpeechSynthesisEventStream {
         let (stream, sender) = BoundedAsyncStream::new(capacity);
         let sender_ptr = Box::into_raw(Box::new(sender));
 
+        // SAFETY: `sender_ptr` is a valid pointer to a freshly allocated `AsyncStreamSender`.
+        // The FFI function will store this pointer and call `event_callback` with it.
         let handle = unsafe {
             avs_synthesis_event_subscribe(
                 synthesizer.as_raw(),
@@ -131,7 +135,8 @@ impl SpeechSynthesisEventStream {
         };
 
         if handle.is_null() {
-            // Clean up the boxed sender if subscription failed
+            // SAFETY: `sender_ptr` was allocated by `Box::into_raw` and has never been
+            // passed to the FFI layer, so it's safe to reconstruct and drop.
             unsafe { drop(Box::from_raw(sender_ptr)) };
             return Err(crate::error::AvSpeechError::Unknown(
                 "Failed to subscribe to synthesis events".to_string(),
@@ -190,21 +195,27 @@ impl std::fmt::Debug for SpeechSynthesisEventStream {
 
 // Event callback from Swift
 extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c_void) {
-    let sender = unsafe { &*ctx.cast::<AsyncStreamSender<SpeechSynthesisEvent>>() };
-
-    if payload.is_null() {
-        return; // Encoding error, skip
-    }
-
-    // Parse the JSON payload
-    let cstr = unsafe { std::ffi::CStr::from_ptr(payload.cast()) };
-    let Ok(json_str) = cstr.to_str() else { return };
-
-    if let Ok(payload) = serde_json::from_str::<EventPayload>(json_str) {
-        if let Some(event) = payload.to_event(kind) {
-            sender.push(event);
+    catch_user_panic("event_callback", || {
+        if ctx.is_null() || payload.is_null() {
+            return; // Null pointer, encoding error, or missing context
         }
-    }
+
+        // SAFETY: `ctx` is a valid pointer to `AsyncStreamSender<SpeechSynthesisEvent>`
+        // because it was stored by `SpeechSynthesisEventStream::subscribe` and is only
+        // dereferenced while the stream (which holds the subscription handle) is alive.
+        let sender = unsafe { &*ctx.cast::<AsyncStreamSender<SpeechSynthesisEvent>>() };
+
+        // SAFETY: `payload` is a valid C string pointer because it came from the Swift bridge
+        // and the bridge guarantees it is null-terminated.
+        let cstr = unsafe { std::ffi::CStr::from_ptr(payload.cast()) };
+        let Ok(json_str) = cstr.to_str() else { return };
+
+        if let Ok(event_payload) = serde_json::from_str::<EventPayload>(json_str) {
+            if let Some(event) = event_payload.to_event(kind) {
+                sender.push(event);
+            }
+        }
+    });
 }
 
 #[derive(serde::Deserialize)]

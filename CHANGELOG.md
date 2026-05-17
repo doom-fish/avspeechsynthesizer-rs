@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] — 2024-12-19
+
+### Fixed
+
+- **Async API safety audit** — Added panic-safe wrapper to `event_callback` FFI callback to prevent unwinding into Swift code
+- **Unsafe correctness** — Added SAFETY comments to all unsafe blocks in `async_api.rs` explaining pointer validity and lifetime guarantees
+- **Doc link** — Fixed redundant explicit link target in `SpeechSynthesisEventStream` documentation
+
 ## [0.3.0] — 2024-05-17
 
 ### Added
