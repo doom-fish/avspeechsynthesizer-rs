@@ -8,17 +8,25 @@ use crate::marker::{MarkerPayload, SpeechSynthesisMarker};
 use crate::private::parse_json_str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Represents the AVSpeechSynthesis common audio-buffer format.
 pub enum SpeechAudioCommonFormat {
+    /// Represents a non-PCM AVSpeechSynthesis audio format.
     Other,
+    /// Represents AVSpeechSynthesis audio encoded as 32-bit floating-point PCM.
     PcmFloat32,
+    /// Represents AVSpeechSynthesis audio encoded as 64-bit floating-point PCM.
     PcmFloat64,
+    /// Represents AVSpeechSynthesis audio encoded as 16-bit integer PCM.
     PcmInt16,
+    /// Represents AVSpeechSynthesis audio encoded as 32-bit integer PCM.
     PcmInt32,
+    /// Represents an unknown AVSpeechSynthesis audio format.
     Unknown,
 }
 
 impl SpeechAudioCommonFormat {
     #[must_use]
+    /// Converts an AVSpeechSynthesis format name into a wrapper enum.
     pub fn from_name(value: &str) -> Self {
         match value {
             "pcmFormatFloat32" => Self::PcmFloat32,
@@ -32,6 +40,7 @@ impl SpeechAudioCommonFormat {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Represents an AVSpeechSynthesis audio buffer yielded by write callbacks.
 pub struct SpeechAudioBuffer {
     sample_rate: f64,
     channel_count: usize,
@@ -45,40 +54,48 @@ pub struct SpeechAudioBuffer {
 
 impl SpeechAudioBuffer {
     #[must_use]
+    /// Returns the AVSpeechSynthesis buffer sample rate.
     pub const fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis buffer channel count.
     pub const fn channel_count(&self) -> usize {
         self.channel_count
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis buffer frame length.
     pub const fn frame_length(&self) -> usize {
         self.frame_length
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis buffer common format.
     pub const fn common_format(&self) -> SpeechAudioCommonFormat {
         self.common_format
     }
 
     #[must_use]
+    /// Returns whether the AVSpeechSynthesis buffer stores interleaved samples.
     pub const fn is_interleaved(&self) -> bool {
         self.is_interleaved
     }
 
     #[must_use]
+    /// Returns the raw AVSpeechSynthesis audio planes.
     pub fn planes(&self) -> &[Vec<u8>] {
         &self.planes
     }
 
     #[must_use]
+    /// Returns the serialized AVSpeechSynthesis audio file settings, if present.
     pub fn audio_file_settings_json(&self) -> Option<&str> {
         self.audio_file_settings_json.as_deref()
     }
 
+    /// Parses the AVSpeechSynthesis audio file settings into JSON values.
     pub fn audio_file_settings(&self) -> Result<Option<Value>, AvSpeechError> {
         self.audio_file_settings_json
             .as_deref()
@@ -87,17 +104,20 @@ impl SpeechAudioBuffer {
     }
 
     #[must_use]
+    /// Returns whether this AVSpeechSynthesis buffer ends the stream.
     pub const fn is_end_of_stream(&self) -> bool {
         self.is_end_of_stream
     }
 
     #[must_use]
+    /// Returns the total byte size across all AVSpeechSynthesis audio planes.
     pub fn total_bytes(&self) -> usize {
         self.planes.iter().map(Vec::len).sum()
     }
 
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
+    /// Returns the approximate AVSpeechSynthesis buffer duration.
     pub fn duration(&self) -> Duration {
         if self.sample_rate <= 0.0 {
             return Duration::ZERO;

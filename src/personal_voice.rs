@@ -7,16 +7,23 @@ use crate::private::result_from_status;
 use crate::voice::{SpeechSynthesisVoice, SpeechSynthesisVoiceTraits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Represents the AVSpeechSynthesis personal-voice authorization state.
 pub enum PersonalVoiceAuthorizationStatus {
+    /// Represents an AVSpeechSynthesis authorization state that has not been requested yet.
     NotDetermined,
+    /// Represents an AVSpeechSynthesis authorization state that was denied.
     Denied,
+    /// Represents an AVSpeechSynthesis authorization state that is unsupported.
     Unsupported,
+    /// Represents an AVSpeechSynthesis authorization state that is granted.
     Authorized,
+    /// Represents an unknown AVSpeechSynthesis authorization raw value.
     Unknown(i32),
 }
 
 impl PersonalVoiceAuthorizationStatus {
     #[must_use]
+    /// Converts an AVSpeechSynthesis authorization raw value into a wrapper enum.
     pub const fn from_raw(raw: i32) -> Self {
         match raw {
             0 => Self::NotDetermined,
@@ -28,11 +35,13 @@ impl PersonalVoiceAuthorizationStatus {
     }
 
     #[must_use]
+    /// Returns whether the AVSpeechSynthesis authorization state is granted.
     pub const fn is_authorized(self) -> bool {
         matches!(self, Self::Authorized)
     }
 }
 
+/// Returns the current AVSpeechSynthesis personal-voice authorization state.
 pub fn personal_voice_authorization_status(
 ) -> Result<PersonalVoiceAuthorizationStatus, AvSpeechError> {
     let mut raw_status = 0;
@@ -44,6 +53,7 @@ pub fn personal_voice_authorization_status(
     Ok(PersonalVoiceAuthorizationStatus::from_raw(raw_status))
 }
 
+/// Requests AVSpeechSynthesis personal-voice authorization and waits up to `timeout`.
 pub fn request_personal_voice_authorization(
     timeout: Duration,
 ) -> Result<PersonalVoiceAuthorizationStatus, AvSpeechError> {
@@ -65,6 +75,7 @@ pub fn request_personal_voice_authorization(
     Ok(PersonalVoiceAuthorizationStatus::from_raw(raw_status))
 }
 
+/// Returns the available AVSpeechSynthesis voices flagged as personal voices.
 pub fn available_personal_voices() -> Result<Vec<SpeechSynthesisVoice>, AvSpeechError> {
     let traits = SpeechSynthesisVoiceTraits::IS_PERSONAL_VOICE;
     Ok(SpeechSynthesisVoice::speech_voices()?

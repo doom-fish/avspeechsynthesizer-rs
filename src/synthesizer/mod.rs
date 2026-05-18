@@ -18,13 +18,17 @@ use crate::private::{
 use crate::utterance::{SpeechUtterance, UtterancePayload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Represents the AVSpeechSynthesis pause or stop boundary.
 pub enum SpeechBoundary {
+    /// Represents the immediate AVSpeechSynthesis boundary.
     Immediate,
+    /// Represents the AVSpeechSynthesis word boundary.
     Word,
 }
 
 impl SpeechBoundary {
     #[must_use]
+    /// Returns the raw AVSpeechSynthesis boundary value.
     pub const fn as_raw(self) -> i32 {
         match self {
             Self::Immediate => 0,
@@ -34,23 +38,36 @@ impl SpeechBoundary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Represents an AVSpeechSynthesis delegate event.
 pub enum SpeechEvent {
+    /// Reports that AVSpeechSynthesis started an utterance.
     DidStart(SpeechUtterance),
+    /// Reports that AVSpeechSynthesis finished an utterance.
     DidFinish(SpeechUtterance),
+    /// Reports that AVSpeechSynthesis paused an utterance.
     DidPause(SpeechUtterance),
+    /// Reports that AVSpeechSynthesis resumed an utterance.
     DidContinue(SpeechUtterance),
+    /// Reports that AVSpeechSynthesis canceled an utterance.
     DidCancel(SpeechUtterance),
+    /// Reports that AVSpeechSynthesis will speak a character range.
     WillSpeakRangeOfSpeechString {
+        /// Stores the AVSpeechSynthesis character range about to be spoken.
         character_range: TextRange,
+        /// Stores the AVSpeechSynthesis utterance that owns the range.
         utterance: SpeechUtterance,
     },
+    /// Reports that AVSpeechSynthesis will speak a marker.
     WillSpeakMarker {
+        /// Stores the AVSpeechSynthesis marker about to be spoken.
         marker: SpeechSynthesisMarker,
+        /// Stores the AVSpeechSynthesis utterance that owns the marker.
         utterance: SpeechUtterance,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Represents an AVSpeechSynthesis utterance written to disk.
 pub struct WrittenAudioFile {
     path: PathBuf,
     markers: Vec<SpeechSynthesisMarker>,
@@ -58,11 +75,13 @@ pub struct WrittenAudioFile {
 
 impl WrittenAudioFile {
     #[must_use]
+    /// Returns the output path produced by AVSpeechSynthesis.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis markers collected while writing the file.
     pub fn markers(&self) -> &[SpeechSynthesisMarker] {
         &self.markers
     }
@@ -206,6 +225,7 @@ impl From<WriteResultPayload> for WrittenAudioFile {
     }
 }
 
+/// Wraps an AVSpeechSynthesis synthesizer instance.
 pub struct SpeechSynthesizer {
     token: *mut c_void,
     callback: Arc<EventHandlerBox>,
@@ -228,6 +248,7 @@ impl Drop for SpeechSynthesizer {
 }
 
 impl SpeechSynthesizer {
+    /// Creates a new AVSpeechSynthesis synthesizer wrapper.
     pub fn new() -> Result<Self, AvSpeechError> {
         let token = unsafe { ffi::synthesizer::avs_synthesizer_new() };
         if token.is_null() {
@@ -241,6 +262,7 @@ impl SpeechSynthesizer {
         })
     }
 
+    /// Returns the AVSpeechSynthesis notification name for voice-catalog changes.
     pub fn available_voices_did_change_notification_name() -> Result<String, AvSpeechError> {
         unsafe {
             string_from_ptr(
@@ -250,6 +272,7 @@ impl SpeechSynthesizer {
         }
     }
 
+    /// Installs an AVSpeechSynthesis delegate callback handler.
     pub fn set_event_handler<F>(&mut self, callback: F)
     where
         F: Fn(SpeechEvent) + Send + Sync + 'static,
@@ -265,6 +288,7 @@ impl SpeechSynthesizer {
         }
     }
 
+    /// Removes the current AVSpeechSynthesis delegate callback handler.
     pub fn clear_event_handler(&mut self) {
         self.callback.clear();
         unsafe {
@@ -272,6 +296,7 @@ impl SpeechSynthesizer {
         }
     }
 
+    /// Starts speaking an AVSpeechSynthesis utterance.
     pub fn speak(&self, utterance: &SpeechUtterance) -> Result<(), AvSpeechError> {
         let utterance_json = json_cstring(&UtterancePayload::from(utterance))?;
         let mut err_msg: *mut c_char = ptr::null_mut();
@@ -289,6 +314,7 @@ impl SpeechSynthesizer {
         }
     }
 
+    /// Streams AVSpeechSynthesis audio buffers for an utterance.
     pub fn write_utterance_with_buffer_callback<F>(
         &self,
         utterance: &SpeechUtterance,
@@ -301,6 +327,7 @@ impl SpeechSynthesizer {
         self.write_utterance_with_callback_box(utterance, &callbacks)
     }
 
+    /// Streams AVSpeechSynthesis audio buffers and markers for an utterance.
     pub fn write_utterance_with_callbacks<F, G>(
         &self,
         utterance: &SpeechUtterance,
@@ -358,26 +385,31 @@ impl SpeechSynthesizer {
     }
 
     #[must_use]
+    /// Requests AVSpeechSynthesis to pause at `boundary`.
     pub fn pause_speaking(&self, boundary: SpeechBoundary) -> bool {
         unsafe { ffi::synthesizer::avs_synthesizer_pause(self.token, boundary.as_raw()) }
     }
 
     #[must_use]
+    /// Requests AVSpeechSynthesis to stop at `boundary`.
     pub fn stop_speaking(&self, boundary: SpeechBoundary) -> bool {
         unsafe { ffi::synthesizer::avs_synthesizer_stop(self.token, boundary.as_raw()) }
     }
 
     #[must_use]
+    /// Requests AVSpeechSynthesis to continue after a pause.
     pub fn continue_speaking(&self) -> bool {
         unsafe { ffi::synthesizer::avs_synthesizer_continue(self.token) }
     }
 
     #[must_use]
+    /// Returns whether AVSpeechSynthesis is currently speaking.
     pub fn is_speaking(&self) -> bool {
         unsafe { ffi::synthesizer::avs_synthesizer_is_speaking(self.token) }
     }
 
     #[must_use]
+    /// Returns whether AVSpeechSynthesis is currently paused.
     pub fn is_paused(&self) -> bool {
         unsafe { ffi::synthesizer::avs_synthesizer_is_paused(self.token) }
     }
@@ -387,6 +419,7 @@ impl SpeechSynthesizer {
         self.token
     }
 
+    /// Writes an AVSpeechSynthesis utterance to an audio file.
     pub fn write_utterance_to_file<P>(
         &self,
         utterance: &SpeechUtterance,
@@ -420,6 +453,7 @@ impl SpeechSynthesizer {
         }
     }
 
+    /// Pumps the AVSpeechSynthesis run loop for `duration`.
     pub fn pump_run_loop(&self, duration: Duration) {
         unsafe {
             ffi::synthesizer::avs_run_loop_pump(duration.as_secs_f64());

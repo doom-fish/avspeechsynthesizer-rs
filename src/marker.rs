@@ -7,35 +7,48 @@ use crate::ffi;
 use crate::private::{error_from_status, json_cstring, parse_json_ptr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+/// Represents an AVSpeechSynthesis text range.
 pub struct TextRange {
+    /// Stores the AVSpeechSynthesis range start location.
     pub location: usize,
+    /// Stores the AVSpeechSynthesis range length.
     pub length: usize,
 }
 
 impl TextRange {
     #[must_use]
+    /// Creates an AVSpeechSynthesis text range wrapper.
     pub const fn new(location: usize, length: usize) -> Self {
         Self { location, length }
     }
 
     #[must_use]
+    /// Returns the exclusive end offset of the AVSpeechSynthesis text range.
     pub const fn end(self) -> usize {
         self.location + self.length
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Represents the AVSpeechSynthesis marker kind.
 pub enum SpeechSynthesisMarkerMark {
+    /// Represents an AVSpeechSynthesis phoneme marker.
     Phoneme,
+    /// Represents an AVSpeechSynthesis word marker.
     Word,
+    /// Represents an AVSpeechSynthesis sentence marker.
     Sentence,
+    /// Represents an AVSpeechSynthesis paragraph marker.
     Paragraph,
+    /// Represents an AVSpeechSynthesis bookmark marker.
     Bookmark,
+    /// Represents an unknown AVSpeechSynthesis marker raw value.
     Unknown(i64),
 }
 
 impl SpeechSynthesisMarkerMark {
     #[must_use]
+    /// Converts an AVSpeechSynthesis marker raw value into a wrapper enum.
     pub const fn from_raw(raw: i64) -> Self {
         match raw {
             0 => Self::Phoneme,
@@ -48,6 +61,7 @@ impl SpeechSynthesisMarkerMark {
     }
 
     #[must_use]
+    /// Returns the raw AVSpeechSynthesis marker value.
     pub const fn as_raw(self) -> i64 {
         match self {
             Self::Phoneme => 0,
@@ -61,15 +75,22 @@ impl SpeechSynthesisMarkerMark {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Represents an AVSpeechSynthesis speech marker.
 pub struct SpeechSynthesisMarker {
+    /// Stores the AVSpeechSynthesis marker kind.
     pub mark: SpeechSynthesisMarkerMark,
+    /// Stores the AVSpeechSynthesis byte-sample offset for the marker.
     pub byte_sample_offset: u64,
+    /// Stores the AVSpeechSynthesis text range for the marker.
     pub text_range: TextRange,
+    /// Stores the AVSpeechSynthesis bookmark name, if present.
     pub bookmark_name: Option<String>,
+    /// Stores the AVSpeechSynthesis phoneme text, if present.
     pub phoneme: Option<String>,
 }
 
 impl SpeechSynthesisMarker {
+    /// Creates a generic AVSpeechSynthesis marker wrapper.
     pub fn new(
         mark: SpeechSynthesisMarkerMark,
         text_range: TextRange,
@@ -85,6 +106,7 @@ impl SpeechSynthesisMarker {
         })
     }
 
+    /// Creates an AVSpeechSynthesis word marker wrapper.
     pub fn word(text_range: TextRange, byte_sample_offset: u64) -> Result<Self, AvSpeechError> {
         construct_marker(&MarkerConstructorPayload {
             constructor: MarkerConstructor::Word,
@@ -96,6 +118,7 @@ impl SpeechSynthesisMarker {
         })
     }
 
+    /// Creates an AVSpeechSynthesis sentence marker wrapper.
     pub fn sentence(text_range: TextRange, byte_sample_offset: u64) -> Result<Self, AvSpeechError> {
         construct_marker(&MarkerConstructorPayload {
             constructor: MarkerConstructor::Sentence,
@@ -107,6 +130,7 @@ impl SpeechSynthesisMarker {
         })
     }
 
+    /// Creates an AVSpeechSynthesis paragraph marker wrapper.
     pub fn paragraph(
         text_range: TextRange,
         byte_sample_offset: u64,
@@ -121,6 +145,7 @@ impl SpeechSynthesisMarker {
         })
     }
 
+    /// Creates an AVSpeechSynthesis phoneme marker wrapper.
     pub fn phoneme(
         phoneme: impl Into<String>,
         byte_sample_offset: u64,
@@ -135,6 +160,7 @@ impl SpeechSynthesisMarker {
         })
     }
 
+    /// Creates an AVSpeechSynthesis bookmark marker wrapper.
     pub fn bookmark(
         bookmark_name: impl Into<String>,
         byte_sample_offset: u64,
@@ -150,26 +176,31 @@ impl SpeechSynthesisMarker {
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis marker kind.
     pub const fn mark(&self) -> SpeechSynthesisMarkerMark {
         self.mark
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis byte-sample offset.
     pub const fn byte_sample_offset(&self) -> u64 {
         self.byte_sample_offset
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis text range.
     pub const fn text_range(&self) -> TextRange {
         self.text_range
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis bookmark name, if present.
     pub fn bookmark_name(&self) -> Option<&str> {
         self.bookmark_name.as_deref()
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis phoneme text, if present.
     pub fn phoneme_text(&self) -> Option<&str> {
         self.phoneme.as_deref()
     }

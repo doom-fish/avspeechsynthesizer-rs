@@ -70,12 +70,16 @@ pub enum SpeechSynthesisEvent {
     DidCancel(SpeechUtterance),
     /// About to speak a character range
     WillSpeakRange {
+        /// Stores the AVSpeechSynthesis character range about to be spoken.
         character_range: TextRange,
+        /// Stores the AVSpeechSynthesis utterance that owns the range.
         utterance: SpeechUtterance,
     },
     /// About to speak a marker (macOS 14+)
     WillSpeakMarker {
+        /// Stores the AVSpeechSynthesis marker about to be spoken.
         marker: SpeechSynthesisMarker,
+        /// Stores the AVSpeechSynthesis utterance that owns the marker.
         utterance: SpeechUtterance,
     },
 }

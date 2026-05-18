@@ -7,19 +7,28 @@
     clippy::module_name_repetitions
 )]
 
+/// AVSpeechSynthesis audio-buffer models and callback payload helpers.
 pub mod buffer_callback;
+/// AVSpeechSynthesis error values returned by this crate.
 pub mod error;
 pub mod ffi;
+/// AVSpeechSynthesis marker wrappers for spoken ranges and bookmarks.
 pub mod marker;
+/// AVSpeechSynthesis personal-voice authorization and discovery helpers.
 pub mod personal_voice;
 mod private;
+/// AVSpeechSynthesis provider-side request and voice wrappers.
 pub mod provider;
+/// AVSpeechSynthesis synthesizer controls, events, and file output helpers.
 pub mod synthesizer;
+/// AVSpeechSynthesis utterance builders and attributed-string helpers.
 pub mod utterance;
+/// AVSpeechSynthesis voice lookup and metadata wrappers.
 pub mod voice;
 
 #[cfg(feature = "async")]
 #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
+/// AVSpeechSynthesis async event-stream helpers.
 pub mod async_api;
 
 pub use buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
@@ -39,6 +48,7 @@ pub use voice::{
     SpeechSynthesisVoiceTraits,
 };
 
+/// AVSpeechSynthesis convenience re-exports for common crate types.
 pub mod prelude {
     pub use crate::buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
     pub use crate::error::AvSpeechError;

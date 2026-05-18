@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.3] - 2026-05-18
+
+- Added concise AVSpeechSynthesis doc comments across the public non-FFI API surface and raised public-item coverage above the release target.
+
 ## [0.3.2] - 2026-05-18
 
 - Widen doom-fish-utils version bound to `<0.3` so 0.2.x resolves.

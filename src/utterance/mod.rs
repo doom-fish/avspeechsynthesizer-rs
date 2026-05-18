@@ -13,26 +13,35 @@ use crate::voice::{SpeechSynthesisVoice, VoicePayload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Represents the AVSpeechSynthesis utterance content kind.
 pub enum SpeechUtteranceKind {
+    /// Represents a plain-text AVSpeechSynthesis utterance.
     PlainText,
+    /// Represents an attributed-text AVSpeechSynthesis utterance.
     AttributedText,
+    /// Represents an SSML AVSpeechSynthesis utterance.
     Ssml,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Represents an AVSpeechSynthesis attributed-string run.
 pub struct SpeechAttributeRun {
+    /// Stores the AVSpeechSynthesis text range for the attribute run.
     pub range: TextRange,
+    /// Stores the AVSpeechSynthesis attributes applied to the run.
     pub attributes: BTreeMap<String, Value>,
 }
 
 impl SpeechAttributeRun {
     #[must_use]
+    /// Creates an AVSpeechSynthesis attributed-string run wrapper.
     pub fn new(range: TextRange, attributes: BTreeMap<String, Value>) -> Self {
         Self { range, attributes }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Represents an AVSpeechSynthesis attributed speech string.
 pub struct AttributedSpeechString {
     text: String,
     runs: Vec<SpeechAttributeRun>,
@@ -40,6 +49,7 @@ pub struct AttributedSpeechString {
 
 impl AttributedSpeechString {
     #[must_use]
+    /// Creates an AVSpeechSynthesis attributed speech string from plain text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -48,16 +58,19 @@ impl AttributedSpeechString {
     }
 
     #[must_use]
+    /// Returns the underlying AVSpeechSynthesis string content.
     pub fn text(&self) -> &str {
         &self.text
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis attribute runs.
     pub fn runs(&self) -> &[SpeechAttributeRun] {
         &self.runs
     }
 
     #[must_use]
+    /// Adds a single AVSpeechSynthesis attribute value to `range`.
     pub fn with_attribute_value(
         mut self,
         range: TextRange,
@@ -71,6 +84,7 @@ impl AttributedSpeechString {
     }
 
     #[must_use]
+    /// Adds an AVSpeechSynthesis attribute map to `range`.
     pub fn with_attributes(
         mut self,
         range: TextRange,
@@ -80,6 +94,7 @@ impl AttributedSpeechString {
         self
     }
 
+    /// Adds the AVSpeechSynthesis IPA-notation attribute to `range`.
     pub fn with_ipa_notation(
         self,
         range: TextRange,
@@ -91,6 +106,7 @@ impl AttributedSpeechString {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Represents an AVSpeechSynthesis utterance.
 pub struct SpeechUtterance {
     kind: SpeechUtteranceKind,
     speech_string: String,
@@ -106,11 +122,15 @@ pub struct SpeechUtterance {
 }
 
 impl SpeechUtterance {
+    /// Represents the minimum AVSpeechSynthesis speech rate constant exposed by this crate.
     pub const MINIMUM_SPEECH_RATE: f32 = 0.0;
+    /// Represents the default AVSpeechSynthesis speech rate constant exposed by this crate.
     pub const DEFAULT_SPEECH_RATE: f32 = 0.5;
+    /// Represents the maximum AVSpeechSynthesis speech rate constant exposed by this crate.
     pub const MAXIMUM_SPEECH_RATE: f32 = 1.0;
 
     #[must_use]
+    /// Creates a plain-text AVSpeechSynthesis utterance.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             kind: SpeechUtteranceKind::PlainText,
@@ -128,6 +148,7 @@ impl SpeechUtterance {
     }
 
     #[must_use]
+    /// Creates an attributed-text AVSpeechSynthesis utterance.
     pub fn from_attributed(attributed_speech_string: AttributedSpeechString) -> Self {
         let speech_string = attributed_speech_string.text.clone();
         Self {
@@ -145,6 +166,7 @@ impl SpeechUtterance {
         }
     }
 
+    /// Creates an SSML AVSpeechSynthesis utterance after validating it.
     pub fn from_ssml(ssml_representation: impl Into<String>) -> Result<Self, AvSpeechError> {
         let ssml_representation = ssml_representation.into();
         let utterance = Self {
@@ -164,85 +186,101 @@ impl SpeechUtterance {
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis speech string.
     pub fn speech_string(&self) -> &str {
         &self.speech_string
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis utterance kind.
     pub const fn kind(&self) -> SpeechUtteranceKind {
         self.kind
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis attributed speech string, if present.
     pub fn attributed_speech_string(&self) -> Option<&AttributedSpeechString> {
         self.attributed_speech_string.as_ref()
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis SSML payload, if present.
     pub fn ssml_representation(&self) -> Option<&str> {
         self.ssml_representation.as_deref()
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis voice override, if present.
     pub fn voice(&self) -> Option<&SpeechSynthesisVoice> {
         self.voice.as_ref()
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis speech rate.
     pub const fn rate(&self) -> f32 {
         self.rate
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis pitch multiplier.
     pub const fn pitch_multiplier(&self) -> f32 {
         self.pitch_multiplier
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis utterance volume.
     pub const fn volume(&self) -> f32 {
         self.volume
     }
 
     #[must_use]
+    /// Returns whether AVSpeechSynthesis assistive-technology settings are preferred.
     pub const fn prefers_assistive_technology_settings(&self) -> bool {
         self.prefers_assistive_technology_settings
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis pre-utterance delay.
     pub const fn pre_utterance_delay(&self) -> f64 {
         self.pre_utterance_delay
     }
 
     #[must_use]
+    /// Returns the AVSpeechSynthesis post-utterance delay.
     pub const fn post_utterance_delay(&self) -> f64 {
         self.post_utterance_delay
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis voice override.
     pub fn with_voice(mut self, voice: SpeechSynthesisVoice) -> Self {
         self.voice = Some(voice);
         self
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis speech rate.
     pub fn with_rate(mut self, rate: f32) -> Self {
         self.rate = rate;
         self
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis pitch multiplier.
     pub fn with_pitch_multiplier(mut self, pitch_multiplier: f32) -> Self {
         self.pitch_multiplier = pitch_multiplier;
         self
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis utterance volume.
     pub fn with_volume(mut self, volume: f32) -> Self {
         self.volume = volume;
         self
     }
 
     #[must_use]
+    /// Sets whether AVSpeechSynthesis should prefer assistive-technology settings.
     pub fn with_prefers_assistive_technology_settings(
         mut self,
         prefers_assistive_technology_settings: bool,
@@ -252,32 +290,38 @@ impl SpeechUtterance {
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis pre-utterance delay.
     pub fn with_pre_utterance_delay(mut self, pre_utterance_delay: f64) -> Self {
         self.pre_utterance_delay = pre_utterance_delay;
         self
     }
 
     #[must_use]
+    /// Sets the AVSpeechSynthesis post-utterance delay.
     pub fn with_post_utterance_delay(mut self, post_utterance_delay: f64) -> Self {
         self.post_utterance_delay = post_utterance_delay;
         self
     }
 
     #[must_use]
+    /// Returns the framework minimum AVSpeechSynthesis speech rate.
     pub fn minimum_speech_rate() -> f32 {
         unsafe { ffi::utterance::avs_utterance_minimum_speech_rate() }
     }
 
     #[must_use]
+    /// Returns the framework default AVSpeechSynthesis speech rate.
     pub fn default_speech_rate() -> f32 {
         unsafe { ffi::utterance::avs_utterance_default_speech_rate() }
     }
 
     #[must_use]
+    /// Returns the framework maximum AVSpeechSynthesis speech rate.
     pub fn maximum_speech_rate() -> f32 {
         unsafe { ffi::utterance::avs_utterance_maximum_speech_rate() }
     }
 
+    /// Returns the AVSpeechSynthesis IPA-notation attribute name.
     pub fn ipa_notation_attribute_name() -> Result<String, AvSpeechError> {
         unsafe {
             string_from_ptr(
@@ -287,6 +331,7 @@ impl SpeechUtterance {
         }
     }
 
+    /// Resolves this AVSpeechSynthesis utterance through the framework bridge.
     pub fn resolved(&self) -> Result<Self, AvSpeechError> {
         let utterance_json = json_cstring(&UtterancePayload::from(self))?;
         let mut err_msg = std::ptr::null_mut();
