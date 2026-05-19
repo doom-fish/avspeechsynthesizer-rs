@@ -1,16 +1,16 @@
 # avspeechsynthesizer-rs coverage audit (vs MacOSX26.2.sdk)
 
-Audited headers: `AVSpeechSynthesis.h` and `AVSpeechSynthesisProvider.h`, which are re-exported by `AVFoundation.framework/Headers/AVFAudio.h` and physically live in `AVFAudio.framework/Headers/` in `MacOSX26.2.sdk`.
+Audited headers: `AVSpeechSynthesis.h` and `AVSpeechSynthesisProvider.h`, plus the targeted `AVMIDIPlayer.h` / `AVMusicEvents.h` rows addressed by this crate release. These headers are re-exported by `AVFoundation.framework/Headers/AVFAudio.h` and physically live in `AVFAudio.framework/Headers/` in `MacOSX26.2.sdk`.
 
 Methodology notes:
 - Objective-C factory/initializer pairs that map to one Rust constructor are grouped into one audit row.
 - Per the audit instructions, macOS-unavailable members were filtered out and are not counted: `AVSpeechSynthesizer.outputChannels`, `AVSpeechSynthesizer.usesApplicationAudioSession`, and `AVSpeechSynthesizer.mixToTelephonyUplink`.
 - `AVSpeechSynthesisProviderAudioUnit` is treated as EXEMPT because this crate targets regular macOS processes, not speech-synthesis Audio Unit extensions; the crate README documents that extension-only provider APIs are intentionally not wrapped.
 
-SDK_PUBLIC_SYMBOLS: 85
-VERIFIED: 79
+SDK_PUBLIC_SYMBOLS: 88
+VERIFIED: 81
 GAPS: 0
-EXEMPT: 6
+EXEMPT: 7
 COVERAGE_PCT: 100.0%
 
 ## 🟢 VERIFIED
@@ -56,6 +56,8 @@ COVERAGE_PCT: 100.0%
 | `AVSpeechSynthesizer.delegate` | property | `AVSpeechSynthesis.h` | `SpeechSynthesizer::set_event_handler(...)`; `SpeechSynthesizer::clear_event_handler()` |
 | `AVSpeechSynthesizer.isSpeaking` | property | `AVSpeechSynthesis.h` | `SpeechSynthesizer::is_speaking()` |
 | `AVSpeechSynthesizer.isPaused` | property | `AVSpeechSynthesis.h` | `SpeechSynthesizer::is_paused()` |
+| `AVMIDIPlayer` | class | `AVMIDIPlayer.h` | `MidiPlayer`, `AVMIDIPlayer` |
+| `AVMIDIChannelEvent` | class | `AVMusicEvents.h` | `MidiChannelEvent`, `AVMIDIChannelEvent` |
 | `AVSpeechSynthesizer.speakUtterance(_:)` | instance method | `AVSpeechSynthesis.h` | `SpeechSynthesizer::speak(...)` |
 | `AVSpeechSynthesizer.writeUtterance(_:toBufferCallback:)` | instance method | `AVSpeechSynthesis.h` | `SpeechSynthesizer::write_utterance_with_buffer_callback(...)`; `SpeechSynthesizer::write_utterance_to_file(...)` |
 | `AVSpeechSynthesizer.writeUtterance(_:toBufferCallback:toMarkerCallback:)` | instance method | `AVSpeechSynthesis.h` | `SpeechSynthesizer::write_utterance_with_callbacks(...)`; `SpeechSynthesizer::write_utterance_to_file(...)` |
@@ -105,6 +107,7 @@ No gaps identified.
 ## ⏭️ EXEMPT
 | Symbol | Kind | Header | Reason | SDK attribute |
 | --- | --- | --- | --- | --- |
+| `AVAudioSessionDelegate` | protocol | `AVAudioSessionDeprecated.h` | Deprecated legacy delegate surface; intentionally excluded while the crate stays focused on current AVSpeech/MIDI APIs. | Deprecated legacy AVAudioSession delegate surface. |
 | `AVSpeechSynthesisProviderOutputBlock` | typealias | `AVSpeechSynthesisProvider.h` | Audio Unit extension host callback; the crate intentionally stops at provider voice/request models for regular processes. | `API_AVAILABLE(ios(16.0), macos(13.0), watchos(9.0), tvos(16.0))` |
 | `AVSpeechSynthesisProviderAudioUnit` | class | `AVSpeechSynthesisProvider.h` | Speech-synthesis Audio Unit extension base class; intentionally out of scope for this crate. | `API_AVAILABLE(ios(16.0), macos(13.0), tvos(16.0)) API_UNAVAILABLE(watchos)` |
 | `AVSpeechSynthesisProviderAudioUnit.speechVoices` | property | `AVSpeechSynthesisProvider.h` | Extension-only Audio Unit surface, not a regular-process AVSpeechSynthesizer binding. | `API_AVAILABLE(ios(16.0), macos(13.0), tvos(16.0)) API_UNAVAILABLE(watchos)` |

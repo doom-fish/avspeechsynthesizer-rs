@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4] - 2026-05-19
+
+### Added
+
+- Added `MidiPlayer` / `AVMIDIPlayer` wrappers for loading MIDI data or files, prerolling playback, transport control, and playback-rate / position inspection.
+- Added `MidiChannelEvent` / `AVMIDIChannelEvent` wrappers for the shared channel-bearing MIDI event base class.
+- Documented the deprecated `AVAudioSessionDelegate` surface as explicitly exempt in `COVERAGE_AUDIT.md`.
+
 ## [0.3.3] - 2026-05-18
 
 - Added concise AVSpeechSynthesis doc comments across the public non-FFI API surface and raised public-item coverage above the release target.

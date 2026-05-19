@@ -5,6 +5,7 @@ use std::ffi::{c_char, c_void};
 pub mod buffer_callback;
 pub mod core;
 pub mod marker;
+pub mod midi;
 pub mod personal_voice;
 pub mod provider;
 pub mod synthesizer;

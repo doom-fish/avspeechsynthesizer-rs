@@ -14,6 +14,8 @@ pub mod error;
 pub mod ffi;
 /// AVSpeechSynthesis marker wrappers for spoken ranges and bookmarks.
 pub mod marker;
+/// AVFAudio MIDI player and channel-event wrappers.
+pub mod midi;
 /// AVSpeechSynthesis personal-voice authorization and discovery helpers.
 pub mod personal_voice;
 mod private;
@@ -34,6 +36,7 @@ pub mod async_api;
 pub use buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
 pub use error::AvSpeechError;
 pub use marker::{SpeechSynthesisMarker, SpeechSynthesisMarkerMark, TextRange};
+pub use midi::{AVMIDIChannelEvent, AVMIDIPlayer, MidiChannelEvent, MidiPlayer};
 pub use personal_voice::{
     available_personal_voices, personal_voice_authorization_status,
     request_personal_voice_authorization, PersonalVoiceAuthorizationStatus,
@@ -53,6 +56,7 @@ pub mod prelude {
     pub use crate::buffer_callback::{SpeechAudioBuffer, SpeechAudioCommonFormat};
     pub use crate::error::AvSpeechError;
     pub use crate::marker::{SpeechSynthesisMarker, SpeechSynthesisMarkerMark, TextRange};
+    pub use crate::midi::{AVMIDIChannelEvent, AVMIDIPlayer, MidiChannelEvent, MidiPlayer};
     pub use crate::personal_voice::{
         available_personal_voices, personal_voice_authorization_status,
         request_personal_voice_authorization, PersonalVoiceAuthorizationStatus,

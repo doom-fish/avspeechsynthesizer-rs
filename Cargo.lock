@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "avspeechsynthesizer-rs"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "base64",
  "doom-fish-utils",
