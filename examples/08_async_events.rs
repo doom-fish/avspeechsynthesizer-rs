@@ -1,8 +1,9 @@
 // Example demonstrating the async stream API for speech synthesis events
 
-use avspeechsynthesizer::prelude::*;
 #[cfg(feature = "async")]
 use avspeechsynthesizer::async_api::SpeechSynthesisEventStream;
+#[cfg(feature = "async")]
+use avspeechsynthesizer::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "async")]

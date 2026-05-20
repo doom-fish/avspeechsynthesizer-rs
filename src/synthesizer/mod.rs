@@ -414,6 +414,8 @@ impl SpeechSynthesizer {
         unsafe { ffi::synthesizer::avs_synthesizer_is_paused(self.token) }
     }
 
+    #[cfg(feature = "async")]
+    #[allow(dead_code, reason = "used by the optional async API surface")]
     #[must_use]
     pub(crate) fn as_raw(&self) -> *mut c_void {
         self.token
