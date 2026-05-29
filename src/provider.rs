@@ -40,16 +40,11 @@ pub struct SpeechSynthesisProviderVoice {
     token: *mut c_void,
 }
 
-impl Drop for SpeechSynthesisProviderVoice {
-    fn drop(&mut self) {
-        if !self.token.is_null() {
-            unsafe {
-                ffi::provider::avs_provider_voice_release(self.token);
-            }
-            self.token = ptr::null_mut();
-        }
-    }
-}
+crate::utils::retained::avs_retained!(
+    SpeechSynthesisProviderVoice,
+    field = token,
+    release = ffi::provider::avs_provider_voice_release,
+);
 
 impl SpeechSynthesisProviderVoice {
     /// Creates an AVSpeechSynthesis provider voice wrapper.
@@ -182,16 +177,11 @@ pub struct SpeechSynthesisProviderRequest {
     token: *mut c_void,
 }
 
-impl Drop for SpeechSynthesisProviderRequest {
-    fn drop(&mut self) {
-        if !self.token.is_null() {
-            unsafe {
-                ffi::provider::avs_provider_request_release(self.token);
-            }
-            self.token = ptr::null_mut();
-        }
-    }
-}
+crate::utils::retained::avs_retained!(
+    SpeechSynthesisProviderRequest,
+    field = token,
+    release = ffi::provider::avs_provider_request_release,
+);
 
 impl SpeechSynthesisProviderRequest {
     /// Creates an AVSpeechSynthesis provider request from SSML and a voice.

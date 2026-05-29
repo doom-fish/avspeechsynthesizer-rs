@@ -19,16 +19,11 @@ pub struct MidiPlayer {
     token: *mut core::ffi::c_void,
 }
 
-impl Drop for MidiPlayer {
-    fn drop(&mut self) {
-        if !self.token.is_null() {
-            unsafe {
-                ffi::midi::avs_midi_player_release(self.token);
-            }
-            self.token = ptr::null_mut();
-        }
-    }
-}
+crate::utils::retained::avs_retained!(
+    MidiPlayer,
+    field = token,
+    release = ffi::midi::avs_midi_player_release,
+);
 
 impl MidiPlayer {
     /// Creates a MIDI player from a file path and optional SoundFont/DLS bank path.
@@ -139,16 +134,11 @@ pub struct MidiChannelEvent {
     token: *mut core::ffi::c_void,
 }
 
-impl Drop for MidiChannelEvent {
-    fn drop(&mut self) {
-        if !self.token.is_null() {
-            unsafe {
-                ffi::midi::avs_midi_channel_event_release(self.token);
-            }
-            self.token = ptr::null_mut();
-        }
-    }
-}
+crate::utils::retained::avs_retained!(
+    MidiChannelEvent,
+    field = token,
+    release = ffi::midi::avs_midi_channel_event_release,
+);
 
 impl MidiChannelEvent {
     /// Creates a base MIDI channel event with the given channel number.

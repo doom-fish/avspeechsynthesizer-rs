@@ -502,5 +502,10 @@ unsafe extern "C" fn event_trampoline(user_info: *mut c_void, payload_json: *con
         _ => return,
     };
 
-    callback_box.dispatch(event);
+    // A panic must never unwind across the `extern "C"` boundary back into
+    // Swift — that is undefined behaviour. Contain any panic from the user
+    // closure here.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        callback_box.dispatch(event);
+    }));
 }

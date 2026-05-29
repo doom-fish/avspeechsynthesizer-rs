@@ -23,6 +23,8 @@ mod private;
 pub mod provider;
 /// AVSpeechSynthesis synthesizer controls, events, and file output helpers.
 pub mod synthesizer;
+/// Internal shared utility macros and helpers.
+pub mod utils;
 /// AVSpeechSynthesis utterance builders and attributed-string helpers.
 pub mod utterance;
 /// AVSpeechSynthesis voice lookup and metadata wrappers.

@@ -15,7 +15,6 @@ let package = Package(
     targets: [
         .target(
             name: "AVSpeechSynthesizerBridge",
-            path: "Sources/AVSpeechSynthesizerBridge",
-            publicHeadersPath: "include")
+            path: "Sources/AVSpeechSynthesizerBridge")
     ]
 )
