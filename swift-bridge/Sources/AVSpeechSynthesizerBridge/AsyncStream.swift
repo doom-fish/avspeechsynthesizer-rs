@@ -43,11 +43,12 @@ final class AVSSynthesisEventBridge: NSObject, AVSpeechSynthesizerDelegate {
 
         do {
             let json = try avsEncodeJSON(payload)
-            var payloadPtr: UnsafeMutableRawPointer?
+            // The pointer provided by `withCString` is only valid for the
+            // duration of the closure. Invoke the C callback inside the closure
+            // so Rust never reads a dangling/freed string pointer.
             json.withCString { cStr in
-                payloadPtr = UnsafeMutableRawPointer(mutating: cStr)
+                onEvent(kind, UnsafeMutableRawPointer(mutating: cStr), ctx)
             }
-            onEvent(kind, payloadPtr, ctx)
         } catch {
             // Silently drop on encoding error
             onEvent(kind, nil, ctx)
