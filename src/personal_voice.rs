@@ -47,7 +47,10 @@ pub fn personal_voice_authorization_status(
     let mut raw_status = 0;
     let mut err_msg: *mut c_char = ptr::null_mut();
     let status = unsafe {
-        ffi::personal_voice::avs_personal_voice_authorization_status(&mut raw_status, &mut err_msg)
+        ffi::personal_voice::avs_personal_voice_authorization_status(
+            &raw mut raw_status,
+            &raw mut err_msg,
+        )
     };
     unsafe { result_from_status(status, err_msg) }?;
     Ok(PersonalVoiceAuthorizationStatus::from_raw(raw_status))
@@ -67,8 +70,8 @@ pub fn request_personal_voice_authorization(
     let status = unsafe {
         ffi::personal_voice::avs_request_personal_voice_authorization(
             timeout_seconds,
-            &mut raw_status,
-            &mut err_msg,
+            &raw mut raw_status,
+            &raw mut err_msg,
         )
     };
     unsafe { result_from_status(status, err_msg) }?;

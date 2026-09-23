@@ -304,7 +304,7 @@ impl SpeechSynthesizer {
             ffi::synthesizer::avs_synthesizer_speak_json(
                 self.token,
                 utterance_json.as_ptr(),
-                &mut err_msg,
+                &raw mut err_msg,
             )
         };
         if status == ffi::status::OK {
@@ -354,8 +354,8 @@ impl SpeechSynthesizer {
             ffi::buffer_callback::avs_synthesizer_collect_buffers_json(
                 self.token,
                 utterance_json.as_ptr(),
-                &mut result_json,
-                &mut err_msg,
+                &raw mut result_json,
+                &raw mut err_msg,
             )
         };
         if status != ffi::status::OK {
@@ -442,8 +442,8 @@ impl SpeechSynthesizer {
                 self.token,
                 utterance_json.as_ptr(),
                 output_path.as_ptr(),
-                &mut result_json,
-                &mut err_msg,
+                &raw mut result_json,
+                &raw mut err_msg,
             )
         };
         if status == ffi::status::OK {

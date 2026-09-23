@@ -255,7 +255,8 @@ fn construct_marker(
 ) -> Result<SpeechSynthesisMarker, AvSpeechError> {
     let payload = json_cstring(&payload)?;
     let mut err_msg: *mut c_char = ptr::null_mut();
-    let marker_json = unsafe { ffi::marker::avs_marker_make_json(payload.as_ptr(), &mut err_msg) };
+    let marker_json =
+        unsafe { ffi::marker::avs_marker_make_json(payload.as_ptr(), &raw mut err_msg) };
     if !err_msg.is_null() {
         return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
     }

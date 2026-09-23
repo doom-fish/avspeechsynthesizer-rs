@@ -336,7 +336,7 @@ impl SpeechUtterance {
         let utterance_json = json_cstring(&UtterancePayload::from(self))?;
         let mut err_msg = std::ptr::null_mut();
         let payload_json = unsafe {
-            ffi::utterance::avs_utterance_roundtrip_json(utterance_json.as_ptr(), &mut err_msg)
+            ffi::utterance::avs_utterance_roundtrip_json(utterance_json.as_ptr(), &raw mut err_msg)
         };
         if !err_msg.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });

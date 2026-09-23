@@ -63,7 +63,7 @@ impl SpeechSynthesisProviderVoice {
         let config_json = json_cstring(&config)?;
         let mut err_msg: *mut c_char = ptr::null_mut();
         let token = unsafe {
-            ffi::provider::avs_provider_voice_new_json(config_json.as_ptr(), &mut err_msg)
+            ffi::provider::avs_provider_voice_new_json(config_json.as_ptr(), &raw mut err_msg)
         };
         if token.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
@@ -75,14 +75,15 @@ impl SpeechSynthesisProviderVoice {
     pub fn update_speech_voices() -> Result<(), AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status =
-            unsafe { ffi::provider::avs_provider_voice_update_speech_voices(&mut err_msg) };
+            unsafe { ffi::provider::avs_provider_voice_update_speech_voices(&raw mut err_msg) };
         unsafe { result_from_status(status, err_msg) }
     }
 
     fn snapshot(&self) -> Result<ProviderVoiceSnapshot, AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
-        let json =
-            unsafe { ffi::provider::avs_provider_voice_snapshot_json(self.token, &mut err_msg) };
+        let json = unsafe {
+            ffi::provider::avs_provider_voice_snapshot_json(self.token, &raw mut err_msg)
+        };
         if !err_msg.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
         }
@@ -135,7 +136,11 @@ impl SpeechSynthesisProviderVoice {
     pub fn set_voice_size(&self, voice_size: i64) -> Result<(), AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status = unsafe {
-            ffi::provider::avs_provider_voice_set_voice_size(self.token, voice_size, &mut err_msg)
+            ffi::provider::avs_provider_voice_set_voice_size(
+                self.token,
+                voice_size,
+                &raw mut err_msg,
+            )
         };
         unsafe { result_from_status(status, err_msg) }
     }
@@ -148,7 +153,7 @@ impl SpeechSynthesisProviderVoice {
             ffi::provider::avs_provider_voice_set_version(
                 self.token,
                 version.as_ptr(),
-                &mut err_msg,
+                &raw mut err_msg,
             )
         };
         unsafe { result_from_status(status, err_msg) }
@@ -158,7 +163,11 @@ impl SpeechSynthesisProviderVoice {
     pub fn set_gender(&self, gender: SpeechSynthesisVoiceGender) -> Result<(), AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status = unsafe {
-            ffi::provider::avs_provider_voice_set_gender(self.token, gender.as_raw(), &mut err_msg)
+            ffi::provider::avs_provider_voice_set_gender(
+                self.token,
+                gender.as_raw(),
+                &raw mut err_msg,
+            )
         };
         unsafe { result_from_status(status, err_msg) }
     }
@@ -167,7 +176,7 @@ impl SpeechSynthesisProviderVoice {
     pub fn set_age(&self, age: i64) -> Result<(), AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status =
-            unsafe { ffi::provider::avs_provider_voice_set_age(self.token, age, &mut err_msg) };
+            unsafe { ffi::provider::avs_provider_voice_set_age(self.token, age, &raw mut err_msg) };
         unsafe { result_from_status(status, err_msg) }
     }
 }
@@ -195,7 +204,7 @@ impl SpeechSynthesisProviderRequest {
             ffi::provider::avs_provider_request_new(
                 voice.token,
                 ssml_representation.as_ptr(),
-                &mut err_msg,
+                &raw mut err_msg,
             )
         };
         if token.is_null() {
@@ -208,7 +217,7 @@ impl SpeechSynthesisProviderRequest {
     pub fn ssml_representation(&self) -> Result<String, AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let string = unsafe {
-            ffi::provider::avs_provider_request_ssml_representation(self.token, &mut err_msg)
+            ffi::provider::avs_provider_request_ssml_representation(self.token, &raw mut err_msg)
         };
         if !err_msg.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
@@ -220,7 +229,7 @@ impl SpeechSynthesisProviderRequest {
     pub fn voice(&self) -> Result<SpeechSynthesisProviderVoice, AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
         let token =
-            unsafe { ffi::provider::avs_provider_request_copy_voice(self.token, &mut err_msg) };
+            unsafe { ffi::provider::avs_provider_request_copy_voice(self.token, &raw mut err_msg) };
         if token.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
         }

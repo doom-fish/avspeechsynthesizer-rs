@@ -231,7 +231,7 @@ impl SpeechSynthesisVoice {
         let mut err_msg = ptr::null_mut();
         let payloads = unsafe {
             optional_json_from_ptr::<Vec<VoicePayload>>(
-                ffi::voice::avs_voices_with_language_json(language.as_ptr(), &mut err_msg),
+                ffi::voice::avs_voices_with_language_json(language.as_ptr(), &raw mut err_msg),
                 err_msg,
                 "voices with language",
             )?
@@ -265,7 +265,7 @@ impl SpeechSynthesisVoice {
                     language
                         .as_ref()
                         .map_or(ptr::null(), |value| value.as_ptr()),
-                    &mut err_msg,
+                    &raw mut err_msg,
                 ),
                 err_msg,
                 "voice with language",
@@ -280,7 +280,7 @@ impl SpeechSynthesisVoice {
         let mut err_msg = ptr::null_mut();
         let payload = unsafe {
             optional_json_from_ptr::<VoicePayload>(
-                ffi::voice::avs_voice_with_identifier_json(identifier.as_ptr(), &mut err_msg),
+                ffi::voice::avs_voice_with_identifier_json(identifier.as_ptr(), &raw mut err_msg),
                 err_msg,
                 "voice with identifier",
             )?

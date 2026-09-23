@@ -42,7 +42,7 @@ impl MidiPlayer {
                 sound_bank_path
                     .as_ref()
                     .map_or(ptr::null(), |value| value.as_ptr()),
-                &mut err_msg,
+                &raw mut err_msg,
             )
         };
         if token.is_null() {
@@ -67,7 +67,7 @@ impl MidiPlayer {
                 sound_bank_path
                     .as_ref()
                     .map_or(ptr::null(), |value| value.as_ptr()),
-                &mut err_msg,
+                &raw mut err_msg,
             )
         };
         if token.is_null() {
@@ -144,7 +144,7 @@ impl MidiChannelEvent {
     /// Creates a base MIDI channel event with the given channel number.
     pub fn new(channel: u32) -> Result<Self, AvSpeechError> {
         let mut err_msg: *mut c_char = ptr::null_mut();
-        let token = unsafe { ffi::midi::avs_midi_channel_event_new(channel, &mut err_msg) };
+        let token = unsafe { ffi::midi::avs_midi_channel_event_new(channel, &raw mut err_msg) };
         if token.is_null() {
             return Err(unsafe { error_from_status(ffi::status::UNKNOWN, err_msg) });
         }
