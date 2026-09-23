@@ -255,7 +255,7 @@ func avsMarkerPayload(from marker: AVSpeechSynthesisMarker) -> AVSMarkerPayload 
     }
     return AVSMarkerPayload(
         mark: Int(marker.mark.rawValue),
-        byteSampleOffset: UInt64(marker.byteSampleOffset),
+        byteSampleOffset: UInt64(truncatingIfNeeded: marker.byteSampleOffset),
         textRange: avsRangePayload(from: marker.textRange),
         bookmarkName: bookmarkName,
         phoneme: phoneme

@@ -16,7 +16,7 @@ public func avs_personal_voice_authorization_status(
         )
         return AVS_UNAVAILABLE_ON_THIS_MACOS
     }
-    outStatus.pointee = Int32(AVSpeechSynthesizer.personalVoiceAuthorizationStatus.rawValue)
+    outStatus.pointee = Int32(clamping: AVSpeechSynthesizer.personalVoiceAuthorizationStatus.rawValue)
     return AVS_OK
 }
 
@@ -56,6 +56,6 @@ public func avs_request_personal_voice_authorization(
         return AVS_TIMED_OUT
     }
 
-    outStatus.pointee = Int32(resolvedStatus.rawValue)
+    outStatus.pointee = Int32(clamping: resolvedStatus.rawValue)
     return AVS_OK
 }
