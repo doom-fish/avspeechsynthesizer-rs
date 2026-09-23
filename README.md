@@ -2,7 +2,16 @@
 
 Safe Rust bindings for Apple's `AVSpeechSynthesizer` text-to-speech APIs on macOS.
 
-> **Status:** v0.2.0 covers the complete public AVSpeech surface that is available to regular macOS apps, including utterances, voices, synthesizer lifecycle control, offline/audio-buffer writes, synthesis markers, provider voice/request models, and personal voice authorization.
+> **Status:** v0.4 covers the complete public AVSpeech surface that is available to regular macOS apps, including utterances, voices, synthesizer lifecycle control, offline/audio-buffer writes, synthesis markers, provider voice/request models, and personal voice authorization.
+
+## Installation
+
+```toml
+[dependencies]
+avspeechsynthesizer-rs = { version = "0.4", features = ["async"] }
+```
+
+The library is imported as `avspeechsynthesizer`. Leave out `features` if you don't need the async event stream.
 
 ## Quick start
 

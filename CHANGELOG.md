@@ -1,5 +1,54 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.0] - Unreleased
+
+### Security
+
+- `SpeechSynthesisEventStream` no longer leaks its sender, and the event
+  handler from `set_event_handler` no longer hands Swift a borrowed
+  pointer. Both contexts are reference-counted with doom-fish-utils'
+  `CallbackContext`, so a delegate callback still running on the main
+  thread when a stream or synthesizer is dropped cannot touch freed
+  memory.
+
+### Fixed
+
+- Subscribing an event stream no longer replaces the synthesizer's
+  delegate. A delegate hub forwards every event to the `set_event_handler`
+  handler and to every stream, so they coexist, and dropping a stream
+  removes only that stream.
+- The buffer-collection and offline-write paths guard their shared state
+  with a lock, stop accepting callbacks once the caller stops waiting, and
+  the offline writer closes its audio file before returning the path.
+- `SpeechSynthesisEventStream::subscribe` rejects a zero capacity with
+  `AvSpeechError::InvalidArgument` instead of panicking.
+- Marker constructors reject a text range whose end does not fit in an
+  `NSRange`.
+- The Swift bridge converts marker byte offsets and Personal Voice status
+  values without trapping.
+- The README stated macOS 10.14 support; the crate requires macOS 13.
+
+### Changed
+
+- **Breaking:** `TextRange::end` returns `Option<usize>`, `None` on
+  overflow.
+- **Breaking (raw FFI):** `avs_synthesizer_set_event_handler` and
+  `avs_synthesis_event_subscribe` take context retain/release callbacks.
+- `doom-fish-utils` is a regular dependency (`>=0.4.1, <0.5`); the
+  `async` feature no longer enables it, and the implicit
+  `doom-fish-utils` feature is gone.
+- `rust-version` is now 1.82 (was 1.76).
+
+## [0.3.7] - 2026-06-06
+
+- Fixed a dangling C-string pointer in the speech event callback and made
+  the event trampoline panic-safe.
+
 ## [0.3.6] - 2026-05-20
 
 - Clippy hygiene sweep: cleared all `-D warnings` lints across the crate. No public API change.
@@ -23,8 +72,6 @@
 ## [0.3.2] - 2026-05-18
 
 - Widen doom-fish-utils version bound to `<0.3` so 0.2.x resolves.
-
-All notable changes to this project will be documented in this file.
 
 ## [0.3.1] — 2024-12-19
 
