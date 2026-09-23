@@ -23,9 +23,10 @@ impl TextRange {
     }
 
     #[must_use]
-    /// Returns the exclusive end offset of the AVSpeechSynthesis text range.
-    pub const fn end(self) -> usize {
-        self.location + self.length
+    /// Returns the exclusive end offset of the AVSpeechSynthesis text range, or
+    /// `None` if it overflows `usize`.
+    pub const fn end(self) -> Option<usize> {
+        self.location.checked_add(self.length)
     }
 }
 
@@ -253,6 +254,15 @@ impl From<MarkerPayload> for SpeechSynthesisMarker {
 fn construct_marker(
     payload: &MarkerConstructorPayload,
 ) -> Result<SpeechSynthesisMarker, AvSpeechError> {
+    if payload
+        .text_range
+        .end()
+        .is_none_or(|end| isize::try_from(end).is_err())
+    {
+        return Err(AvSpeechError::InvalidArgument(
+            "marker text range end must fit in an NSRange".to_owned(),
+        ));
+    }
     let payload = json_cstring(&payload)?;
     let mut err_msg: *mut c_char = ptr::null_mut();
     let marker_json =
@@ -262,4 +272,31 @@ fn construct_marker(
     }
     let payload: MarkerPayload = unsafe { parse_json_ptr(marker_json, "speech synthesis marker") }?;
     Ok(payload.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SpeechSynthesisMarker, TextRange};
+    use crate::error::AvSpeechError;
+
+    #[test]
+    fn end_is_checked() {
+        assert_eq!(TextRange::new(2, 3).end(), Some(5));
+        assert_eq!(TextRange::new(usize::MAX, 0).end(), Some(usize::MAX));
+        assert_eq!(TextRange::new(usize::MAX, 1).end(), None);
+        assert_eq!(TextRange::new(1, usize::MAX).end(), None);
+    }
+
+    #[test]
+    fn markers_reject_ranges_that_do_not_fit_an_nsrange() {
+        for range in [
+            TextRange::new(usize::MAX, 1),
+            TextRange::new(1, isize::MAX.unsigned_abs()),
+        ] {
+            assert!(matches!(
+                SpeechSynthesisMarker::sentence(range, 0),
+                Err(AvSpeechError::InvalidArgument(_))
+            ));
+        }
+    }
 }
