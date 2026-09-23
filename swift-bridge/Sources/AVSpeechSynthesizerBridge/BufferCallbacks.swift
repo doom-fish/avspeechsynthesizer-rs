@@ -1,4 +1,3 @@
-// swiftlint:disable function_body_length
 import AVFAudio
 import Foundation
 
@@ -52,28 +51,61 @@ private func avsAudioBufferPayload(
     )
 }
 
+private final class AVSCollectedBuffers {
+    private let lock = NSLock()
+    private var events: [AVSCollectedBufferWriteEvent] = []
+    private var failure: Error?
+    private var isClosed = false
+
+    var isAccepting: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !isClosed && failure == nil
+    }
+
+    func record(_ event: AVSCollectedBufferWriteEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed, failure == nil else { return }
+        events.append(event)
+    }
+
+    func fail(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed, failure == nil else { return }
+        failure = error
+    }
+
+    func close() -> (events: [AVSCollectedBufferWriteEvent], failure: Error?) {
+        lock.lock()
+        defer { lock.unlock() }
+        isClosed = true
+        return (events, failure)
+    }
+}
+
 private func avsCollectUtteranceBuffers(
     with box: AVSSynthesizerBox,
     payload: AVSUtterancePayload
 ) throws -> AVSCollectedBufferWritePayload {
     let utterance = try avsUtterance(from: payload)
     let semaphore = DispatchSemaphore(value: 0)
-    var capturedError: Error?
-    var events: [AVSCollectedBufferWriteEvent] = []
+    let collected = AVSCollectedBuffers()
 
     let bridgeBufferCallback: AVSpeechSynthesizer.BufferCallback = { buffer in
-        guard capturedError == nil else { return }
+        guard collected.isAccepting else { return }
         guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
-            capturedError = AVSBridgeError.io(
+            collected.fail(AVSBridgeError.io(
                 "AVSpeechSynthesizer emitted a non-PCM audio buffer"
-            )
+            ))
             semaphore.signal()
             return
         }
 
         let isEndOfStream = pcmBuffer.frameLength == 0
         let payload = avsAudioBufferPayload(from: pcmBuffer, isEndOfStream: isEndOfStream)
-        events.append(
+        collected.record(
             AVSCollectedBufferWriteEvent(
                 kind: .buffer,
                 buffer: payload,
@@ -86,7 +118,7 @@ private func avsCollectUtteranceBuffers(
     }
 
     box.synthesizer.write(utterance, toBufferCallback: bridgeBufferCallback) { markers in
-        events.append(
+        collected.record(
             AVSCollectedBufferWriteEvent(
                 kind: .markerBatch,
                 buffer: nil,
@@ -95,18 +127,20 @@ private func avsCollectUtteranceBuffers(
         )
     }
 
-    if !avsWaitForSignal(semaphore, timeoutSeconds: 120) {
+    let signaled = avsWaitForSignal(semaphore, timeoutSeconds: 120)
+    let result = collected.close()
+    if !signaled {
         throw AVSBridgeError.timedOut("buffer callback synthesis timed out after 120 seconds")
     }
 
-    if let capturedError {
+    if let capturedError = result.failure {
         if let bridgeError = capturedError as? AVSBridgeError {
             throw bridgeError
         }
         throw AVSBridgeError.framework(capturedError)
     }
 
-    return AVSCollectedBufferWritePayload(events: events)
+    return AVSCollectedBufferWritePayload(events: result.events)
 }
 
 @_cdecl("avs_synthesizer_collect_buffers_json")

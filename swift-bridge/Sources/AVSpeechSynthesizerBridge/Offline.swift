@@ -1,6 +1,69 @@
-// swiftlint:disable function_body_length cyclomatic_complexity
 import AVFAudio
 import Foundation
+
+private struct AVSOfflineWriteOutcome {
+    var failure: Error?
+    var sawCompletion: Bool
+    var markers: [AVSpeechSynthesisMarker]
+}
+
+private final class AVSOfflineWrite {
+    private let lock = NSLock()
+    private let outputURL: URL
+    private var audioFile: AVAudioFile?
+    private var failure: Error?
+    private var sawCompletion = false
+    private var markers: [AVSpeechSynthesisMarker] = []
+    private var isClosed = false
+
+    init(outputURL: URL) {
+        self.outputURL = outputURL
+    }
+
+    func handle(_ buffer: AVAudioBuffer) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed, failure == nil else { return false }
+        guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
+            failure = AVSBridgeError.io("AVSpeechSynthesizer emitted a non-PCM audio buffer")
+            return true
+        }
+        if pcmBuffer.frameLength == 0 {
+            sawCompletion = true
+            return true
+        }
+        do {
+            if audioFile == nil {
+                audioFile = try AVAudioFile(
+                    forWriting: outputURL,
+                    settings: pcmBuffer.format.settings,
+                    commonFormat: pcmBuffer.format.commonFormat,
+                    interleaved: pcmBuffer.format.isInterleaved
+                )
+            }
+            try audioFile?.write(from: pcmBuffer)
+            return false
+        } catch {
+            failure = error
+            return true
+        }
+    }
+
+    func append(_ emittedMarkers: [AVSpeechSynthesisMarker]) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed else { return }
+        markers.append(contentsOf: emittedMarkers)
+    }
+
+    func close() -> AVSOfflineWriteOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        isClosed = true
+        audioFile = nil
+        return AVSOfflineWriteOutcome(failure: failure, sawCompletion: sawCompletion, markers: markers)
+    }
+}
 
 private func avsWriteUtterance(
     with box: AVSSynthesizerBox,
@@ -20,55 +83,30 @@ private func avsWriteUtterance(
 
     let utterance = try avsUtterance(from: payload)
     let semaphore = DispatchSemaphore(value: 0)
-    var audioFile: AVAudioFile?
-    var capturedError: Error?
-    var sawCompletion = false
-    var markers: [AVSpeechSynthesisMarker] = []
+    let write = AVSOfflineWrite(outputURL: outputURL)
 
     let bufferCallback: AVSpeechSynthesizer.BufferCallback = { buffer in
-        guard capturedError == nil else { return }
-        guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
-            capturedError = AVSBridgeError.io(
-                "AVSpeechSynthesizer emitted a non-PCM audio buffer"
-            )
-            semaphore.signal()
-            return
-        }
-        if pcmBuffer.frameLength == 0 {
-            sawCompletion = true
-            semaphore.signal()
-            return
-        }
-        do {
-            if audioFile == nil {
-                audioFile = try AVAudioFile(
-                    forWriting: outputURL,
-                    settings: pcmBuffer.format.settings,
-                    commonFormat: pcmBuffer.format.commonFormat,
-                    interleaved: pcmBuffer.format.isInterleaved
-                )
-            }
-            try audioFile?.write(from: pcmBuffer)
-        } catch {
-            capturedError = error
+        if write.handle(buffer) {
             semaphore.signal()
         }
     }
 
     box.synthesizer.write(utterance, toBufferCallback: bufferCallback) { emittedMarkers in
-        markers.append(contentsOf: emittedMarkers)
+        write.append(emittedMarkers)
     }
 
-    if !avsWaitForSignal(semaphore, timeoutSeconds: 120) {
+    let signaled = avsWaitForSignal(semaphore, timeoutSeconds: 120)
+    let result = write.close()
+    if !signaled {
         throw AVSBridgeError.timedOut("offline synthesis timed out after 120 seconds")
     }
-    if let capturedError {
+    if let capturedError = result.failure {
         if let bridgeError = capturedError as? AVSBridgeError {
             throw bridgeError
         }
         throw AVSBridgeError.framework(capturedError)
     }
-    if !sawCompletion {
+    if !result.sawCompletion {
         throw AVSBridgeError.unknown(
             "offline synthesis ended without an end-of-stream buffer"
         )
@@ -76,7 +114,7 @@ private func avsWriteUtterance(
 
     return AVSWriteResultPayload(
         outputPath: outputPath,
-        markers: markers.map(avsMarkerPayload)
+        markers: result.markers.map(avsMarkerPayload)
     )
 }
 

@@ -66,6 +66,10 @@ maintenance = { status = "actively-developed" }
 [[example]]
 name = "02_framework_smoke"
 
+[[test]]
+name = "offline_write"
+harness = false
+
 [profile.release]
 debug = "full"
 strip = "none"
