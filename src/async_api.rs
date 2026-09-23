@@ -50,10 +50,12 @@
 use crate::ffi::synthesizer::{avs_synthesis_event_subscribe, avs_synthesis_event_unsubscribe};
 use crate::marker::{SpeechSynthesisMarker, TextRange};
 use crate::utterance::SpeechUtterance;
-use doom_fish_utils::panic_safe::catch_user_panic;
+use doom_fish_utils::callback_context::CallbackContext;
 use doom_fish_utils::stream::{AsyncStreamSender, BoundedAsyncStream};
 use std::convert::TryFrom;
 use std::ffi::c_void;
+
+type SenderContext = CallbackContext<AsyncStreamSender<SpeechSynthesisEvent>>;
 
 /// A speech synthesis event emitted from the [`SpeechSynthesisEventStream`]
 #[derive(Debug, Clone)]
@@ -85,14 +87,18 @@ pub enum SpeechSynthesisEvent {
 }
 
 /// Handle that closes the async event stream when dropped
-struct SubscriptionHandle(*mut c_void);
+struct SubscriptionHandle {
+    bridge: *mut c_void,
+    context: SenderContext,
+}
 
 impl Drop for SubscriptionHandle {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            // SAFETY: `self.0` is a valid handle returned by `avs_synthesis_event_subscribe`
+        self.context.deactivate();
+        if !self.bridge.is_null() {
+            // SAFETY: `self.bridge` is a valid handle returned by `avs_synthesis_event_subscribe`
             // and is being freed exactly once (guaranteed by Drop semantics).
-            unsafe { avs_synthesis_event_unsubscribe(self.0) };
+            unsafe { avs_synthesis_event_unsubscribe(self.bridge) };
         }
     }
 }
@@ -125,23 +131,25 @@ impl SpeechSynthesisEventStream {
         synthesizer: &crate::synthesizer::SpeechSynthesizer,
         capacity: usize,
     ) -> Result<Self, crate::error::AvSpeechError> {
+        if capacity == 0 {
+            return Err(crate::error::AvSpeechError::InvalidArgument(
+                "event stream capacity must be greater than zero".to_string(),
+            ));
+        }
         let (stream, sender) = BoundedAsyncStream::new(capacity);
-        let sender_ptr = Box::into_raw(Box::new(sender));
+        let context = SenderContext::new(sender);
 
-        // SAFETY: `sender_ptr` is a valid pointer to a freshly allocated `AsyncStreamSender`.
-        // The FFI function will store this pointer and call `event_callback` with it.
-        let handle = unsafe {
+        let bridge = unsafe {
             avs_synthesis_event_subscribe(
                 synthesizer.as_raw(),
                 event_callback,
-                sender_ptr.cast(),
+                context.as_ptr(),
+                Some(SenderContext::RETAIN),
+                Some(SenderContext::RELEASE),
             )
         };
 
-        if handle.is_null() {
-            // SAFETY: `sender_ptr` was allocated by `Box::into_raw` and has never been
-            // passed to the FFI layer, so it's safe to reconstruct and drop.
-            unsafe { drop(Box::from_raw(sender_ptr)) };
+        if bridge.is_null() {
             return Err(crate::error::AvSpeechError::Unknown(
                 "Failed to subscribe to synthesis events".to_string(),
             ));
@@ -149,7 +157,7 @@ impl SpeechSynthesisEventStream {
 
         Ok(Self {
             inner: stream,
-            _handle: SubscriptionHandle(handle),
+            _handle: SubscriptionHandle { bridge, context },
         })
     }
 
@@ -198,16 +206,11 @@ impl std::fmt::Debug for SpeechSynthesisEventStream {
 }
 
 // Event callback from Swift
-extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c_void) {
-    catch_user_panic("event_callback", || {
-        if ctx.is_null() || payload.is_null() {
-            return; // Null pointer, encoding error, or missing context
+unsafe extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c_void) {
+    let push = |sender: &AsyncStreamSender<SpeechSynthesisEvent>| {
+        if payload.is_null() {
+            return;
         }
-
-        // SAFETY: `ctx` is a valid pointer to `AsyncStreamSender<SpeechSynthesisEvent>`
-        // because it was stored by `SpeechSynthesisEventStream::subscribe` and is only
-        // dereferenced while the stream (which holds the subscription handle) is alive.
-        let sender = unsafe { &*ctx.cast::<AsyncStreamSender<SpeechSynthesisEvent>>() };
 
         // SAFETY: `payload` is a valid C string pointer because it came from the Swift bridge
         // and the bridge guarantees it is null-terminated.
@@ -219,7 +222,8 @@ extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c_void) 
                 sender.push(event);
             }
         }
-    });
+    };
+    let _ = unsafe { SenderContext::with(ctx, "event_callback", push) };
 }
 
 #[derive(serde::Deserialize)]
@@ -256,4 +260,95 @@ impl EventPayload {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
 
+    use super::{SpeechSynthesisEvent, SpeechSynthesisEventStream};
+    use crate::error::AvSpeechError;
+    use crate::synthesizer::test_support::{deliver_start, listener_counts};
+    use crate::synthesizer::{SpeechEvent, SpeechSynthesizer};
+
+    fn started_text(event: Option<SpeechSynthesisEvent>) -> String {
+        match event {
+            Some(SpeechSynthesisEvent::DidStart(utterance)) => utterance.speech_string().to_owned(),
+            other => panic!("expected a DidStart event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_stream_coexists_with_the_event_handler() {
+        let mut synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let (tx, rx) = mpsc::channel();
+        synthesizer.set_event_handler(move |event| {
+            let _ = tx.send(event);
+        });
+        let stream = SpeechSynthesisEventStream::subscribe(&synthesizer, 8).expect("stream");
+        assert_eq!(listener_counts(&synthesizer), (true, 1));
+
+        deliver_start(&synthesizer, c"both");
+        assert_eq!(started_text(stream.try_next()), "both");
+        assert!(matches!(rx.try_recv(), Ok(SpeechEvent::DidStart(_))));
+
+        drop(stream);
+        assert_eq!(listener_counts(&synthesizer), (true, 0));
+        deliver_start(&synthesizer, c"handler only");
+        match rx.try_recv() {
+            Ok(SpeechEvent::DidStart(utterance)) => {
+                assert_eq!(utterance.speech_string(), "handler only");
+            }
+            other => panic!("expected the handler to keep receiving events, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_stream_receives_every_event() {
+        let synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let first = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("first");
+        let second = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("second");
+        assert_eq!(listener_counts(&synthesizer), (false, 2));
+
+        deliver_start(&synthesizer, c"shared");
+        assert_eq!(started_text(first.try_next()), "shared");
+        assert_eq!(started_text(second.try_next()), "shared");
+
+        drop(first);
+        deliver_start(&synthesizer, c"second only");
+        assert_eq!(started_text(second.try_next()), "second only");
+        assert_eq!(listener_counts(&synthesizer), (false, 1));
+    }
+
+    #[test]
+    fn dropping_the_subscription_frees_the_sender() {
+        let synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let SpeechSynthesisEventStream {
+            inner,
+            _handle: handle,
+        } = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("stream");
+        assert!(!inner.is_closed());
+
+        drop(handle);
+        assert!(inner.is_closed());
+        assert_eq!(listener_counts(&synthesizer), (false, 0));
+    }
+
+    #[test]
+    fn a_stream_can_outlive_its_synthesizer() {
+        let synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let stream = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("stream");
+        drop(synthesizer);
+        assert!(stream.try_next().is_none());
+        assert_eq!(stream.buffered_count(), 0);
+        drop(stream);
+    }
+
+    #[test]
+    fn zero_capacity_is_rejected() {
+        let synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        assert!(matches!(
+            SpeechSynthesisEventStream::subscribe(&synthesizer, 0),
+            Err(AvSpeechError::InvalidArgument(_))
+        ));
+        assert_eq!(listener_counts(&synthesizer), (false, 0));
+    }
+}

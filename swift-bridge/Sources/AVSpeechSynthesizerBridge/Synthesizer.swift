@@ -3,16 +3,21 @@ import Foundation
 
 final class AVSRustSpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
     let callback: AVSJSONCallback
-    let userInfo: UnsafeMutableRawPointer?
+    let retention: AVSContextRetention
 
-    init(callback: @escaping AVSJSONCallback, userInfo: UnsafeMutableRawPointer?) {
+    init(
+        callback: @escaping AVSJSONCallback,
+        userInfo: UnsafeMutableRawPointer?,
+        retain: AVSContextCallback?,
+        release: AVSContextCallback?
+    ) {
         self.callback = callback
-        self.userInfo = userInfo
+        self.retention = AVSContextRetention(context: userInfo, retain: retain, release: release)
         super.init()
     }
 
     private func emit(_ payload: AVSEventPayload) {
-        avsEmitJSON(callback, userInfo: userInfo, payload: payload)
+        avsEmitJSON(callback, userInfo: retention.context, payload: payload)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
@@ -93,19 +98,131 @@ final class AVSRustSpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
 
 extension AVSRustSpeechDelegate: @unchecked Sendable {}
 
+final class AVSDelegateHub: NSObject, AVSpeechSynthesizerDelegate {
+    private let lock = NSLock()
+    private var handler: AVSRustSpeechDelegate?
+    private var subscribers: [AVSSynthesisEventBridge] = []
+
+    func setHandler(_ newHandler: AVSRustSpeechDelegate?) {
+        lock.lock()
+        let previous = handler
+        handler = newHandler
+        lock.unlock()
+        withExtendedLifetime(previous) {}
+    }
+
+    func add(_ subscriber: AVSSynthesisEventBridge) {
+        lock.lock()
+        subscribers.append(subscriber)
+        lock.unlock()
+    }
+
+    func remove(_ subscriber: AVSSynthesisEventBridge) {
+        lock.lock()
+        let removed = subscribers.firstIndex { $0 === subscriber }.map { subscribers.remove(at: $0) }
+        lock.unlock()
+        withExtendedLifetime(removed) {}
+    }
+
+    var subscriberCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return subscribers.count
+    }
+
+    var hasHandler: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return handler != nil
+    }
+
+    private func listeners() -> [AVSpeechSynthesizerDelegate] {
+        lock.lock()
+        defer { lock.unlock() }
+        var listeners: [AVSpeechSynthesizerDelegate] = []
+        if let handler {
+            listeners.append(handler)
+        }
+        listeners.append(contentsOf: subscribers)
+        return listeners
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, didStart: utterance)
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, didFinish: utterance)
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, didPause: utterance)
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, didContinue: utterance)
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, didCancel: utterance)
+        }
+    }
+
+    func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        willSpeakRangeOfSpeechString characterRange: NSRange,
+        utterance: AVSpeechUtterance
+    ) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(
+                synthesizer,
+                willSpeakRangeOfSpeechString: characterRange,
+                utterance: utterance
+            )
+        }
+    }
+
+    @available(macOS 14.0, *)
+    func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        willSpeak marker: AVSpeechSynthesisMarker,
+        utterance: AVSpeechUtterance
+    ) {
+        for listener in listeners() {
+            listener.speechSynthesizer?(synthesizer, willSpeak: marker, utterance: utterance)
+        }
+    }
+}
+
+extension AVSDelegateHub: @unchecked Sendable {}
+
 final class AVSSynthesizerBox: NSObject {
     let synthesizer = AVSpeechSynthesizer()
-    var delegateBox: AVSRustSpeechDelegate?
+    let hub = AVSDelegateHub()
 
-    func setEventHandler(callback: AVSJSONCallback?, userInfo: UnsafeMutableRawPointer?) {
-        guard let callback else {
-            synthesizer.delegate = nil
-            delegateBox = nil
-            return
-        }
-        let delegateBox = AVSRustSpeechDelegate(callback: callback, userInfo: userInfo)
-        self.delegateBox = delegateBox
-        synthesizer.delegate = delegateBox
+    override init() {
+        super.init()
+        synthesizer.delegate = hub
+    }
+
+    func setEventHandler(
+        callback: AVSJSONCallback?,
+        userInfo: UnsafeMutableRawPointer?,
+        retain: AVSContextCallback?,
+        release: AVSContextCallback?
+    ) {
+        hub.setHandler(callback.map {
+            AVSRustSpeechDelegate(callback: $0, userInfo: userInfo, retain: retain, release: release)
+        })
     }
 }
 
@@ -135,11 +252,25 @@ public func avs_synthesizer_release(_ token: UnsafeMutableRawPointer?) {
 public func avs_synthesizer_set_event_handler(
     _ token: UnsafeMutableRawPointer?,
     _ callback: AVSJSONCallback?,
-    _ userInfo: UnsafeMutableRawPointer?
+    _ userInfo: UnsafeMutableRawPointer?,
+    _ retain: AVSContextCallback?,
+    _ release: AVSContextCallback?
 ) {
     guard let token else { return }
     let box: AVSSynthesizerBox = avsBorrow(token)
-    box.setEventHandler(callback: callback, userInfo: userInfo)
+    box.setEventHandler(callback: callback, userInfo: userInfo, retain: retain, release: release)
+}
+
+@_cdecl("avs_synthesizer_listener_counts")
+public func avs_synthesizer_listener_counts(
+    _ token: UnsafeMutableRawPointer?,
+    _ outHasHandler: UnsafeMutablePointer<Bool>?,
+    _ outSubscribers: UnsafeMutablePointer<Int>?
+) {
+    guard let token else { return }
+    let box: AVSSynthesizerBox = avsBorrow(token)
+    outHasHandler?.pointee = box.hub.hasHandler && box.synthesizer.delegate === box.hub
+    outSubscribers?.pointee = box.hub.subscriberCount
 }
 
 @_cdecl("avs_synthesizer_is_speaking")

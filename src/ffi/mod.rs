@@ -20,6 +20,7 @@ pub type AVSBufferCallback =
     unsafe extern "C" fn(user_info: *mut c_void, payload_json: *const c_char);
 pub type AVSMarkerCallback =
     unsafe extern "C" fn(user_info: *mut c_void, payload_json: *const c_char);
+pub type AVSContextCallback = unsafe extern "C" fn(context: *mut c_void);
 
 pub mod status {
     pub const OK: i32 = 0;

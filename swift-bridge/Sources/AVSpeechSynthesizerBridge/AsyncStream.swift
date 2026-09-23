@@ -25,11 +25,19 @@ struct AVSSynthesisEventPayload: Codable {
 /// Bridge class that conforms to AVSpeechSynthesizerDelegate and forwards events to a C callback
 final class AVSSynthesisEventBridge: NSObject, AVSpeechSynthesizerDelegate {
     let onEvent: AVSAsyncStreamCallback
-    let ctx: UnsafeMutableRawPointer?
+    let retention: AVSContextRetention
+    weak var hub: AVSDelegateHub?
 
-    init(onEvent: @escaping AVSAsyncStreamCallback, ctx: UnsafeMutableRawPointer?) {
+    init(
+        onEvent: @escaping AVSAsyncStreamCallback,
+        ctx: UnsafeMutableRawPointer?,
+        retain: AVSContextCallback?,
+        release: AVSContextCallback?,
+        hub: AVSDelegateHub
+    ) {
         self.onEvent = onEvent
-        self.ctx = ctx
+        self.retention = AVSContextRetention(context: ctx, retain: retain, release: release)
+        self.hub = hub
         super.init()
     }
 
@@ -47,11 +55,11 @@ final class AVSSynthesisEventBridge: NSObject, AVSpeechSynthesizerDelegate {
             // duration of the closure. Invoke the C callback inside the closure
             // so Rust never reads a dangling/freed string pointer.
             json.withCString { cStr in
-                onEvent(kind, UnsafeMutableRawPointer(mutating: cStr), ctx)
+                onEvent(kind, UnsafeMutableRawPointer(mutating: cStr), retention.context)
             }
         } catch {
             // Silently drop on encoding error
-            onEvent(kind, nil, ctx)
+            onEvent(kind, nil, retention.context)
         }
     }
 
@@ -104,20 +112,39 @@ extension AVSSynthesisEventBridge: @unchecked Sendable {}
 public func avs_synthesis_event_subscribe(
     _ token: UnsafeMutableRawPointer?,
     _ onEvent: @escaping AVSAsyncStreamCallback,
-    _ ctx: UnsafeMutableRawPointer?
+    _ ctx: UnsafeMutableRawPointer?,
+    _ ctxRetain: AVSContextCallback?,
+    _ ctxRelease: AVSContextCallback?
 ) -> UnsafeMutableRawPointer? {
     guard let token else {
         return nil
     }
     let box: AVSSynthesizerBox = avsBorrow(token)
-    let bridge = AVSSynthesisEventBridge(onEvent: onEvent, ctx: ctx)
-    box.synthesizer.delegate = bridge
+    let bridge = AVSSynthesisEventBridge(
+        onEvent: onEvent,
+        ctx: ctx,
+        retain: ctxRetain,
+        release: ctxRelease,
+        hub: box.hub
+    )
+    box.hub.add(bridge)
     return avsRetain(bridge)
 }
 
 @_cdecl("avs_synthesis_event_unsubscribe")
 public func avs_synthesis_event_unsubscribe(_ handle: UnsafeMutableRawPointer?) {
     guard let handle else { return }
-    avsRelease(handle)
+    let bridge = Unmanaged<AVSSynthesisEventBridge>.fromOpaque(handle).takeRetainedValue()
+    bridge.hub?.remove(bridge)
+}
+
+@_cdecl("avs_synthesizer_deliver_test_start")
+public func avs_synthesizer_deliver_test_start(
+    _ token: UnsafeMutableRawPointer?,
+    _ text: UnsafePointer<CChar>?
+) {
+    guard let token, let text else { return }
+    let box: AVSSynthesizerBox = avsBorrow(token)
+    box.hub.speechSynthesizer(box.synthesizer, didStart: AVSpeechUtterance(string: String(cString: text)))
 }
 

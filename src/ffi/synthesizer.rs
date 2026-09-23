@@ -1,6 +1,6 @@
 use core::ffi::{c_char, c_void};
 
-use super::AVSEventCallback;
+use super::{AVSContextCallback, AVSEventCallback};
 
 pub type AVSAsyncStreamCallback =
     unsafe extern "C" fn(kind: i32, payload: *mut c_void, ctx: *mut c_void);
@@ -12,6 +12,8 @@ extern "C" {
         token: *mut c_void,
         callback: Option<AVSEventCallback>,
         user_info: *mut c_void,
+        retain: Option<AVSContextCallback>,
+        release: Option<AVSContextCallback>,
     );
     pub fn avs_synthesizer_is_speaking(token: *mut c_void) -> bool;
     pub fn avs_synthesizer_is_paused(token: *mut c_void) -> bool;
@@ -36,6 +38,8 @@ extern "C" {
         token: *mut c_void,
         on_event: AVSAsyncStreamCallback,
         ctx: *mut c_void,
+        ctx_retain: Option<AVSContextCallback>,
+        ctx_release: Option<AVSContextCallback>,
     ) -> *mut c_void;
     pub fn avs_synthesis_event_unsubscribe(handle: *mut c_void);
 }

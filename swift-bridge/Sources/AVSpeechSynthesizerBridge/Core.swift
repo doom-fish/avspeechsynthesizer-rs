@@ -11,6 +11,26 @@ let AVS_FRAMEWORK_ERROR: Int32 = -5
 let AVS_UNKNOWN: Int32 = -99
 
 public typealias AVSJSONCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Void
+public typealias AVSContextCallback = @convention(c) (UnsafeMutableRawPointer?) -> Void
+
+final class AVSContextRetention {
+    let context: UnsafeMutableRawPointer?
+    private let release: AVSContextCallback?
+
+    init(context: UnsafeMutableRawPointer?, retain: AVSContextCallback?, release: AVSContextCallback?) {
+        self.context = context
+        self.release = release
+        if let context, let retain {
+            retain(context)
+        }
+    }
+
+    deinit {
+        if let context, let release {
+            release(context)
+        }
+    }
+}
 
 @_cdecl("avs_string_free")
 public func avs_string_free(_ string: UnsafeMutablePointer<CChar>?) {

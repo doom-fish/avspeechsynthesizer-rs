@@ -1,9 +1,10 @@
 use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
+use doom_fish_utils::callback_context::CallbackContext;
 use serde::Deserialize;
 
 use crate::buffer_callback::{
@@ -88,6 +89,7 @@ impl WrittenAudioFile {
 }
 
 type EventHandler = Box<dyn Fn(SpeechEvent) + Send + Sync + 'static>;
+type HandlerContext = CallbackContext<EventHandlerBox>;
 type BufferHandler = Box<dyn FnMut(SpeechAudioBuffer) + Send + 'static>;
 type MarkerHandler = Box<dyn FnMut(Vec<SpeechSynthesisMarker>) + Send + 'static>;
 
@@ -228,17 +230,20 @@ impl From<WriteResultPayload> for WrittenAudioFile {
 /// Wraps an AVSpeechSynthesis synthesizer instance.
 pub struct SpeechSynthesizer {
     token: *mut c_void,
-    callback: Arc<EventHandlerBox>,
+    callback: HandlerContext,
 }
 
 impl Drop for SpeechSynthesizer {
     fn drop(&mut self) {
+        self.callback.deactivate();
         if !self.token.is_null() {
             unsafe {
                 ffi::synthesizer::avs_synthesizer_set_event_handler(
                     self.token,
                     None,
                     ptr::null_mut(),
+                    None,
+                    None,
                 );
                 ffi::synthesizer::avs_synthesizer_release(self.token);
             }
@@ -258,7 +263,7 @@ impl SpeechSynthesizer {
         }
         Ok(Self {
             token,
-            callback: Arc::new(EventHandlerBox::default()),
+            callback: CallbackContext::new(EventHandlerBox::default()),
         })
     }
 
@@ -277,22 +282,29 @@ impl SpeechSynthesizer {
     where
         F: Fn(SpeechEvent) + Send + Sync + 'static,
     {
-        self.callback.replace(callback);
-        let callback_raw = Arc::as_ptr(&self.callback).cast::<c_void>().cast_mut();
+        self.callback.get().replace(callback);
         unsafe {
             ffi::synthesizer::avs_synthesizer_set_event_handler(
                 self.token,
                 Some(event_trampoline),
-                callback_raw,
+                self.callback.as_ptr(),
+                Some(HandlerContext::RETAIN),
+                Some(HandlerContext::RELEASE),
             );
         }
     }
 
     /// Removes the current AVSpeechSynthesis delegate callback handler.
     pub fn clear_event_handler(&mut self) {
-        self.callback.clear();
+        self.callback.get().clear();
         unsafe {
-            ffi::synthesizer::avs_synthesizer_set_event_handler(self.token, None, ptr::null_mut());
+            ffi::synthesizer::avs_synthesizer_set_event_handler(
+                self.token,
+                None,
+                ptr::null_mut(),
+                None,
+                None,
+            );
         }
     }
 
@@ -464,48 +476,149 @@ impl SpeechSynthesizer {
 }
 
 unsafe extern "C" fn event_trampoline(user_info: *mut c_void, payload_json: *const c_char) {
-    if user_info.is_null() || payload_json.is_null() {
-        return;
+    let dispatch = |callback_box: &EventHandlerBox| {
+        if let Some(event) = unsafe { speech_event_from_json(payload_json) } {
+            callback_box.dispatch(event);
+        }
+    };
+    let _ = unsafe { HandlerContext::with(user_info, "event_trampoline", dispatch) };
+}
+
+unsafe fn speech_event_from_json(payload_json: *const c_char) -> Option<SpeechEvent> {
+    if payload_json.is_null() {
+        return None;
     }
+    let payload = unsafe { CStr::from_ptr(payload_json) }.to_str().ok()?;
+    let raw = serde_json::from_str::<EventPayload>(payload).ok()?;
+    let utterance = SpeechUtterance::try_from(raw.utterance).ok()?;
 
-    let callback_box = &*user_info.cast::<EventHandlerBox>();
-    let Ok(payload) = CStr::from_ptr(payload_json).to_str() else {
-        return;
-    };
-    let Ok(raw) = serde_json::from_str::<EventPayload>(payload) else {
-        return;
-    };
-    let Ok(utterance) = SpeechUtterance::try_from(raw.utterance) else {
-        return;
-    };
-
-    let event = match raw.event.as_str() {
+    Some(match raw.event.as_str() {
         "didStart" => SpeechEvent::DidStart(utterance),
         "didFinish" => SpeechEvent::DidFinish(utterance),
         "didPause" => SpeechEvent::DidPause(utterance),
         "didContinue" => SpeechEvent::DidContinue(utterance),
         "didCancel" => SpeechEvent::DidCancel(utterance),
-        "willSpeakRangeOfSpeechString" => match raw.character_range {
-            Some(character_range) => SpeechEvent::WillSpeakRangeOfSpeechString {
-                character_range: character_range.into(),
-                utterance,
-            },
-            None => return,
+        "willSpeakRangeOfSpeechString" => SpeechEvent::WillSpeakRangeOfSpeechString {
+            character_range: raw.character_range?.into(),
+            utterance,
         },
-        "willSpeakMarker" => match raw.marker {
-            Some(marker) => SpeechEvent::WillSpeakMarker {
-                marker: marker.into(),
-                utterance,
-            },
-            None => return,
+        "willSpeakMarker" => SpeechEvent::WillSpeakMarker {
+            marker: raw.marker?.into(),
+            utterance,
         },
-        _ => return,
-    };
+        _ => return None,
+    })
+}
 
-    // A panic must never unwind across the `extern "C"` boundary back into
-    // Swift — that is undefined behaviour. Contain any panic from the user
-    // closure here.
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        callback_box.dispatch(event);
-    }));
+#[cfg(test)]
+pub(crate) mod test_support {
+    use core::ffi::{c_char, c_void, CStr};
+
+    use super::SpeechSynthesizer;
+
+    extern "C" {
+        fn avs_synthesizer_listener_counts(
+            token: *mut c_void,
+            out_has_handler: *mut bool,
+            out_subscribers: *mut usize,
+        );
+        fn avs_synthesizer_deliver_test_start(token: *mut c_void, text: *const c_char);
+    }
+
+    pub fn deliver_start(synthesizer: &SpeechSynthesizer, text: &CStr) {
+        unsafe { avs_synthesizer_deliver_test_start(synthesizer.token, text.as_ptr()) };
+    }
+
+    pub fn listener_counts(synthesizer: &SpeechSynthesizer) -> (bool, usize) {
+        let mut has_handler = false;
+        let mut subscribers = usize::MAX;
+        unsafe {
+            avs_synthesizer_listener_counts(
+                synthesizer.token,
+                &raw mut has_handler,
+                &raw mut subscribers,
+            );
+        };
+        (has_handler, subscribers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
+
+    use super::test_support::{deliver_start, listener_counts};
+    use super::{SpeechEvent, SpeechSynthesizer};
+
+    fn started_text(event: Result<SpeechEvent, mpsc::TryRecvError>) -> String {
+        match event {
+            Ok(SpeechEvent::DidStart(utterance)) => utterance.speech_string().to_owned(),
+            other => panic!("expected a DidStart event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn event_handler_receives_events_until_cleared() {
+        let mut synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        assert_eq!(listener_counts(&synthesizer), (false, 0));
+        let (tx, rx) = mpsc::channel();
+        synthesizer.set_event_handler(move |event| {
+            let _ = tx.send(event);
+        });
+        assert_eq!(listener_counts(&synthesizer), (true, 0));
+
+        deliver_start(&synthesizer, c"first");
+        assert_eq!(started_text(rx.try_recv()), "first");
+
+        synthesizer.clear_event_handler();
+        assert_eq!(listener_counts(&synthesizer), (false, 0));
+        deliver_start(&synthesizer, c"second");
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn replacing_the_event_handler_frees_the_previous_one() {
+        let mut synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let first = Arc::new(());
+        let captured = Arc::clone(&first);
+        synthesizer.set_event_handler(move |_| {
+            let _ = &captured;
+        });
+        assert_eq!(Arc::strong_count(&first), 2);
+
+        synthesizer.set_event_handler(|_| {});
+        assert_eq!(Arc::strong_count(&first), 1);
+    }
+
+    #[test]
+    fn dropping_the_synthesizer_frees_the_event_handler() {
+        let mut synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let probe = Arc::new(());
+        let captured = Arc::clone(&probe);
+        synthesizer.set_event_handler(move |_| {
+            let _ = &captured;
+        });
+        assert_eq!(Arc::strong_count(&probe), 2);
+
+        drop(synthesizer);
+        assert_eq!(Arc::strong_count(&probe), 1);
+    }
+
+    #[test]
+    fn a_panicking_event_handler_is_contained() {
+        let mut synthesizer = SpeechSynthesizer::new().expect("synthesizer");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        synthesizer.set_event_handler(move |_| {
+            assert!(
+                counter.fetch_add(1, Ordering::SeqCst) > 0,
+                "first event panics"
+            );
+        });
+
+        deliver_start(&synthesizer, c"panics");
+        deliver_start(&synthesizer, c"survives");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
 }
