@@ -6,6 +6,8 @@ GAPS: 0
 EXEMPT: 6
 COVERAGE_PCT: 100.0%
 
+Re-checked on 2026-09-23: `MacOSX26.2.sdk` is no longer installed, and `AVSpeechSynthesis.h` and `AVSpeechSynthesisProvider.h` are identical in `MacOSX26.5.sdk` and `MacOSX27.0.sdk` (`AVMIDIPlayer.h` only adds `NS_SWIFT_SENDING` to its completion handler type). VERIFIED means a Rust entry point exists for the symbol; it does not mean the behavior is covered by a test. This file and `COVERAGE_AUDIT_V2.md` count different symbol sets (88 here, including the MIDI rows; 85 there).
+
 **Methodology:** All public macOS-available symbols were enumerated from AVSpeechSynthesis.h and AVSpeechSynthesisProvider.h headers in MacOSX26.2.sdk. Symbols marked `API_UNAVAILABLE(macos)` (outputChannels, usesApplicationAudioSession, mixToTelephonyUplink) were excluded. Objective-C factory/initializer pairs mapping to single Rust constructors are counted as one verified symbol. The six EXEMPT entries document intentional out-of-scope provider APIs (Audio Unit extensions) with SDK availability citations.
 
 ## 🟢 VERIFIED

@@ -13,6 +13,8 @@ GAPS: 0
 EXEMPT: 7
 COVERAGE_PCT: 100.0%
 
+Re-checked on 2026-09-23: `MacOSX26.2.sdk` is no longer installed, and `AVSpeechSynthesis.h` and `AVSpeechSynthesisProvider.h` are identical in `MacOSX26.5.sdk` and `MacOSX27.0.sdk` (`AVMIDIPlayer.h` only adds `NS_SWIFT_SENDING` to its completion handler type). VERIFIED means a Rust entry point exists for the symbol; it does not mean the behavior is covered by a test. This file and `COVERAGE_AUDIT_V2.md` count different symbol sets (88 here, including the MIDI rows; 85 there).
+
 ## 🟢 VERIFIED
 | Symbol | Kind | Header | Wrapped by |
 | --- | --- | --- | --- |

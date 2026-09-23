@@ -38,6 +38,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Events and threading
+
+`AVSpeechSynthesizer` delivers its delegate events and the audio-buffer callbacks behind `write_utterance_to_file` and `write_utterance_with_*` on the main thread, whichever thread owns the synthesizer. Call these from the main thread and pump its run loop (`SpeechSynthesizer::pump_run_loop`), or run an app event loop. Otherwise events never arrive and the write calls fail with `AvSpeechError::TimedOut` after 120 seconds.
+
+## Async API
+
+Enable the `async` feature for `async_api::SpeechSynthesisEventStream`, an executor-agnostic stream of delegate events. The handler from `set_event_handler` and any number of streams receive every event side by side; dropping a stream removes only that stream. The buffer drops its oldest event when it is full, and a capacity of zero is rejected with `AvSpeechError::InvalidArgument`.
+
 ## Covered areas
 
 - `AVSpeechSynthesizer`
@@ -72,13 +80,14 @@ cargo run --example 04_buffer_callback
 cargo run --example 05_marker_roundtrip
 cargo run --example 06_provider_roundtrip
 cargo run --example 07_personal_voice_status
+cargo run --example 08_async_events --features async
 ```
 
 ## Availability notes
 
-- Base speech synthesis APIs are available on macOS 10.14+.
-- SSML utterances, synthesis providers, and marker callbacks require newer AVFAudio SDKs/runtime support.
-- Personal Voice authorization and personal-voice traits require macOS 14+.
+- The crate requires macOS 13 or later, the deployment target of its Swift bridge.
+- Word, sentence, paragraph, phoneme and bookmark markers, marker callbacks, Personal Voice authorization and voice traits require macOS 14 or later; on macOS 13 those marker constructors and the Personal Voice authorization calls return `AvSpeechError::UnavailableOnThisMacOS`, and `available_personal_voices` returns an empty list.
+- `request_personal_voice_authorization` shows a system permission prompt.
 - Extension-only provider audio-unit APIs are intentionally not wrapped for regular processes.
 
 ## Coverage audit

@@ -46,7 +46,7 @@ Legend:
 | `AVSpeechUtterance.prefersAssistiveTechnologySettings` | ✅ | `SpeechUtterance::prefers_assistive_technology_settings()`, `with_prefers_assistive_technology_settings(...)` |
 | `AVSpeechUtterance.preUtteranceDelay` | ✅ | `SpeechUtterance::pre_utterance_delay()`, `with_pre_utterance_delay(...)` |
 | `AVSpeechUtterance.postUtteranceDelay` | ✅ | `SpeechUtterance::post_utterance_delay()`, `with_post_utterance_delay(...)` |
-| `AVSpeechSynthesizer.delegate` | ✅ | `SpeechSynthesizer::set_event_handler(...)`, `clear_event_handler()` |
+| `AVSpeechSynthesizer.delegate` | ✅ | `SpeechSynthesizer::set_event_handler(...)`, `clear_event_handler()`, and `async_api::SpeechSynthesisEventStream` (feature `async`); both receive every event |
 | `AVSpeechSynthesizer.isSpeaking` | ✅ | `SpeechSynthesizer::is_speaking()` |
 | `AVSpeechSynthesizer.isPaused` | ✅ | `SpeechSynthesizer::is_paused()` |
 | `AVSpeechSynthesizer.speak(_:)` | ✅ | `SpeechSynthesizer::speak(...)` |
