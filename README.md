@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Async API
 
-Enable the `async` feature for `async_api::SpeechSynthesisEventStream`, an executor-agnostic stream of delegate events. The handler from `set_event_handler` and any number of streams receive every event side by side; dropping a stream removes only that stream. The buffer drops its oldest event when it is full, and a capacity of zero is rejected with `AvSpeechError::InvalidArgument`.
+Enable the `async` feature for `async_api::SpeechSynthesisEventStream`, an executor-agnostic stream of delegate events. The handler from `set_event_handler` and any number of streams receive every event side by side; dropping a stream removes only that stream, and dropping the synthesizer ends its streams once their buffered events are drained. The buffer drops its oldest event when it is full, and a capacity of zero is rejected with `AvSpeechError::InvalidArgument`.
 
 ## Covered areas
 

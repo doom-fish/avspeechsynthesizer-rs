@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `SpeechSynthesisEventStream` ends once its `SpeechSynthesizer` is
+  dropped: `next()` returns `None` after the buffered events. It used to
+  stay open forever, so a consumer loop hung.
 - Subscribing an event stream no longer replaces the synthesizer's
   delegate. A delegate hub forwards every event to the `set_event_handler`
   handler and to every stream, so they coexist, and dropping a stream
@@ -38,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `TextRange::end` returns `Option<usize>`, `None` on
   overflow.
 - **Breaking (raw FFI):** `avs_synthesizer_set_event_handler` and
-  `avs_synthesis_event_subscribe` take context retain/release callbacks.
+  `avs_synthesis_event_subscribe` take context retain/release callbacks,
+  and `avs_synthesis_event_subscribe` also takes a close callback.
 - `doom-fish-utils` is a regular dependency (`>=0.4.1, <0.5`); the
   `async` feature no longer enables it, and the implicit
   `doom-fish-utils` feature is gone.
