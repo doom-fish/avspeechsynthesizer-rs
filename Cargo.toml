@@ -70,6 +70,15 @@ name = "02_framework_smoke"
 name = "offline_write"
 harness = false
 
+[[test]]
+name = "synthesizer_tests"
+harness = false
+
+[[test]]
+name = "async_stream_event_flow"
+harness = false
+required-features = ["async"]
+
 [profile.release]
 debug = "full"
 strip = "none"

@@ -92,6 +92,10 @@ cargo run --example 07_personal_voice_status
 cargo run --example 08_async_events --features async
 ```
 
+## Testing
+
+A plain `cargo test` is silent. The lifecycle-event and event-stream tests are harness-free binaries that run on the process main thread and synthesize into audio buffers instead of speaking. Set `AVSPEECHSYNTHESIZER_LIVE_TESTS=1` to also run the `02_framework_smoke` example, which speaks aloud.
+
 ## Availability notes
 
 - The crate requires macOS 13 or later, the deployment target of its Swift bridge.
