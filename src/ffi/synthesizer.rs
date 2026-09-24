@@ -37,6 +37,7 @@ extern "C" {
     pub fn avs_synthesis_event_subscribe(
         token: *mut c_void,
         on_event: AVSAsyncStreamCallback,
+        on_close: Option<AVSContextCallback>,
         ctx: *mut c_void,
         ctx_retain: Option<AVSContextCallback>,
         ctx_release: Option<AVSContextCallback>,

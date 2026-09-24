@@ -54,8 +54,10 @@ use doom_fish_utils::callback_context::CallbackContext;
 use doom_fish_utils::stream::{AsyncStreamSender, BoundedAsyncStream};
 use std::convert::TryFrom;
 use std::ffi::c_void;
+use std::sync::{Mutex, PoisonError};
 
-type SenderContext = CallbackContext<AsyncStreamSender<SpeechSynthesisEvent>>;
+type SharedSender = Mutex<Option<AsyncStreamSender<SpeechSynthesisEvent>>>;
+type SenderContext = CallbackContext<SharedSender>;
 
 /// A speech synthesis event emitted from the [`SpeechSynthesisEventStream`]
 #[derive(Debug, Clone)]
@@ -137,12 +139,13 @@ impl SpeechSynthesisEventStream {
             ));
         }
         let (stream, sender) = BoundedAsyncStream::new(capacity);
-        let context = SenderContext::new(sender);
+        let context = SenderContext::new(Mutex::new(Some(sender)));
 
         let bridge = unsafe {
             avs_synthesis_event_subscribe(
                 synthesizer.as_raw(),
                 event_callback,
+                Some(close_callback),
                 context.as_ptr(),
                 Some(SenderContext::RETAIN),
                 Some(SenderContext::RELEASE),
@@ -207,7 +210,7 @@ impl std::fmt::Debug for SpeechSynthesisEventStream {
 
 // Event callback from Swift
 unsafe extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c_void) {
-    let push = |sender: &AsyncStreamSender<SpeechSynthesisEvent>| {
+    let push = |sender: &SharedSender| {
         if payload.is_null() {
             return;
         }
@@ -219,11 +222,24 @@ unsafe extern "C" fn event_callback(kind: i32, payload: *mut c_void, ctx: *mut c
 
         if let Ok(event_payload) = serde_json::from_str::<EventPayload>(json_str) {
             if let Some(event) = event_payload.to_event(kind) {
-                sender.push(event);
+                if let Some(sender) = sender
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                {
+                    sender.push(event);
+                }
             }
         }
     };
     let _ = unsafe { SenderContext::with(ctx, "event_callback", push) };
+}
+
+unsafe extern "C" fn close_callback(ctx: *mut c_void) {
+    let close = |sender: &SharedSender| {
+        drop(sender.lock().unwrap_or_else(PoisonError::into_inner).take());
+    };
+    let _ = unsafe { SenderContext::with(ctx, "close_callback", close) };
 }
 
 #[derive(serde::Deserialize)]
@@ -333,13 +349,16 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_can_outlive_its_synthesizer() {
+    fn a_stream_ends_when_its_synthesizer_is_dropped() {
         let synthesizer = SpeechSynthesizer::new().expect("synthesizer");
-        let stream = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("stream");
+        let mut stream = SpeechSynthesisEventStream::subscribe(&synthesizer, 4).expect("stream");
+        deliver_start(&synthesizer, c"last");
+        assert!(!stream.is_closed());
+
         drop(synthesizer);
-        assert!(stream.try_next().is_none());
-        assert_eq!(stream.buffered_count(), 0);
-        drop(stream);
+        assert!(stream.is_closed());
+        assert_eq!(started_text(stream.try_next()), "last");
+        assert!(pollster::block_on(stream.next()).is_none());
     }
 
     #[test]

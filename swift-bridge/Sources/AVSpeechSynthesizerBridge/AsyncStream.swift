@@ -25,20 +25,27 @@ struct AVSSynthesisEventPayload: Codable {
 /// Bridge class that conforms to AVSpeechSynthesizerDelegate and forwards events to a C callback
 final class AVSSynthesisEventBridge: NSObject, AVSpeechSynthesizerDelegate {
     let onEvent: AVSAsyncStreamCallback
+    let onClose: AVSContextCallback?
     let retention: AVSContextRetention
     weak var hub: AVSDelegateHub?
 
     init(
         onEvent: @escaping AVSAsyncStreamCallback,
+        onClose: AVSContextCallback?,
         ctx: UnsafeMutableRawPointer?,
         retain: AVSContextCallback?,
         release: AVSContextCallback?,
         hub: AVSDelegateHub
     ) {
         self.onEvent = onEvent
+        self.onClose = onClose
         self.retention = AVSContextRetention(context: ctx, retain: retain, release: release)
         self.hub = hub
         super.init()
+    }
+
+    func close() {
+        onClose?(retention.context)
     }
 
     private func emit(kind: Int32, utterance: AVSpeechUtterance, characterRange: NSRange? = nil, marker: AVSpeechSynthesisMarker? = nil) {
@@ -112,6 +119,7 @@ extension AVSSynthesisEventBridge: @unchecked Sendable {}
 public func avs_synthesis_event_subscribe(
     _ token: UnsafeMutableRawPointer?,
     _ onEvent: @escaping AVSAsyncStreamCallback,
+    _ onClose: AVSContextCallback?,
     _ ctx: UnsafeMutableRawPointer?,
     _ ctxRetain: AVSContextCallback?,
     _ ctxRelease: AVSContextCallback?
@@ -122,6 +130,7 @@ public func avs_synthesis_event_subscribe(
     let box: AVSSynthesizerBox = avsBorrow(token)
     let bridge = AVSSynthesisEventBridge(
         onEvent: onEvent,
+        onClose: onClose,
         ctx: ctx,
         retain: ctxRetain,
         release: ctxRelease,

@@ -103,6 +103,12 @@ final class AVSDelegateHub: NSObject, AVSpeechSynthesizerDelegate {
     private var handler: AVSRustSpeechDelegate?
     private var subscribers: [AVSSynthesisEventBridge] = []
 
+    deinit {
+        for subscriber in subscribers {
+            subscriber.close()
+        }
+    }
+
     func setHandler(_ newHandler: AVSRustSpeechDelegate?) {
         lock.lock()
         let previous = handler
