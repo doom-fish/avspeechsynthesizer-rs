@@ -4,7 +4,10 @@ use avspeechsynthesizer::prelude::*;
 fn avspeech_surface_is_available() -> Result<(), Box<dyn std::error::Error>> {
     let current_language = SpeechSynthesisVoice::current_language_code()?;
     let all_voices = SpeechSynthesisVoice::speech_voices()?;
-    assert!(!all_voices.is_empty());
+    assert_ne!(
+        all_voices,
+        [] as [avspeechsynthesizer::SpeechSynthesisVoice; 0]
+    );
 
     let filtered = SpeechSynthesisVoice::voices_with_language(&current_language)?;
     let default_voice = SpeechSynthesisVoice::voice_with_language(&current_language)?;

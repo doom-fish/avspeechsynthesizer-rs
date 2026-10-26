@@ -10,7 +10,7 @@ const TEXT: &str = "Lifecycle event check.";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let notification = SpeechSynthesizer::available_voices_did_change_notification_name()?;
-    assert!(!notification.is_empty());
+    assert_ne!(notification, "");
 
     synthesizer_emits_lifecycle_events_while_writing()?;
     framework_smoke_example_speaks_aloud()
