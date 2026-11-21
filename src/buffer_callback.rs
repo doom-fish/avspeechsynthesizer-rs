@@ -1,10 +1,9 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::Deserialize;
+use core::ffi::{c_char, CStr};
 use serde_json::Value;
 use std::time::Duration;
 
 use crate::error::AvSpeechError;
-use crate::marker::{MarkerPayload, SpeechSynthesisMarker};
+use crate::ffi::buffer_callback::AudioPlaneList;
 use crate::private::parse_json_str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,73 +125,65 @@ impl SpeechAudioBuffer {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AudioBufferPayload {
-    sample_rate: f64,
-    channel_count: usize,
-    frame_length: usize,
-    common_format: String,
-    is_interleaved: bool,
-    planes_base64: Vec<String>,
-    audio_file_settings_json: Option<String>,
-    is_end_of_stream: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MarkerBatchPayload {
-    pub(crate) markers: Vec<MarkerPayload>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum CollectedBufferWriteEventKind {
-    Buffer,
-    MarkerBatch,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CollectedBufferWriteEvent {
-    pub(crate) kind: CollectedBufferWriteEventKind,
-    pub(crate) buffer: Option<AudioBufferPayload>,
-    pub(crate) marker_batch: Option<MarkerBatchPayload>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CollectedBufferWritePayload {
-    pub(crate) events: Vec<CollectedBufferWriteEvent>,
-}
-
-impl TryFrom<AudioBufferPayload> for SpeechAudioBuffer {
-    type Error = AvSpeechError;
-
-    fn try_from(payload: AudioBufferPayload) -> Result<Self, Self::Error> {
-        let mut planes = Vec::with_capacity(payload.planes_base64.len());
-        for plane in payload.planes_base64 {
-            let decoded = STANDARD.decode(plane).map_err(|error| {
-                AvSpeechError::Unknown(format!("failed to decode audio plane from base64: {error}"))
-            })?;
-            planes.push(decoded);
+impl SpeechAudioBuffer {
+    pub(crate) unsafe fn from_native(
+        sample_rate: f64,
+        channel_count: u32,
+        frame_length: u32,
+        format: usize,
+        is_interleaved: bool,
+        list: *const AudioPlaneList,
+        settings: *const c_char,
+    ) -> Result<Self, AvSpeechError> {
+        let mut planes = Vec::new();
+        if frame_length != 0 {
+            if list.is_null() {
+                return Err(AvSpeechError::Io("missing PCM buffer list".into()));
+            }
+            let count = unsafe { (*list).count } as usize;
+            let first = unsafe { core::ptr::addr_of!((*list).planes) }.cast();
+            let buffers = unsafe {
+                std::slice::from_raw_parts::<crate::ffi::buffer_callback::AudioPlane>(first, count)
+            };
+            for buffer in buffers {
+                if buffer.size == 0 {
+                    planes.push(Vec::new());
+                } else if buffer.data.is_null() {
+                    return Err(AvSpeechError::Io("missing PCM plane data".into()));
+                } else {
+                    planes.push(
+                        unsafe { std::slice::from_raw_parts(buffer.data, buffer.size as usize) }
+                            .to_vec(),
+                    );
+                }
+            }
         }
-
+        let audio_file_settings_json = if settings.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { CStr::from_ptr(settings) }
+                    .to_str()
+                    .map_err(|e| AvSpeechError::Io(e.to_string()))?
+                    .to_owned(),
+            )
+        };
         Ok(Self {
-            sample_rate: payload.sample_rate,
-            channel_count: payload.channel_count,
-            frame_length: payload.frame_length,
-            common_format: SpeechAudioCommonFormat::from_name(&payload.common_format),
-            is_interleaved: payload.is_interleaved,
+            sample_rate,
+            channel_count: channel_count as usize,
+            frame_length: frame_length as usize,
+            common_format: match format {
+                0 => SpeechAudioCommonFormat::Other,
+                1 => SpeechAudioCommonFormat::PcmFloat32,
+                2 => SpeechAudioCommonFormat::PcmFloat64,
+                3 => SpeechAudioCommonFormat::PcmInt16,
+                4 => SpeechAudioCommonFormat::PcmInt32,
+                _ => SpeechAudioCommonFormat::Unknown,
+            },
+            is_interleaved,
             planes,
-            audio_file_settings_json: payload.audio_file_settings_json,
-            is_end_of_stream: payload.is_end_of_stream,
+            audio_file_settings_json,
+            is_end_of_stream: frame_length == 0,
         })
-    }
-}
-
-impl From<MarkerBatchPayload> for Vec<SpeechSynthesisMarker> {
-    fn from(payload: MarkerBatchPayload) -> Self {
-        payload.markers.into_iter().map(Into::into).collect()
     }
 }

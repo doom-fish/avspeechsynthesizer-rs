@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use avspeechsynthesizer::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== AVSpeechSynthesizer.framework smoke ==");
     println!(
         "voices notification name: {}",

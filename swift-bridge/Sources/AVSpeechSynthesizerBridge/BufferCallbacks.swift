@@ -1,160 +1,109 @@
 import AVFAudio
 import Foundation
 
-private func avsAudioCommonFormatName(_ format: AVAudioCommonFormat) -> String {
-    switch format {
-    case .otherFormat:
-        return "otherFormat"
-    case .pcmFormatFloat32:
-        return "pcmFormatFloat32"
-    case .pcmFormatFloat64:
-        return "pcmFormatFloat64"
-    case .pcmFormatInt16:
-        return "pcmFormatInt16"
-    case .pcmFormatInt32:
-        return "pcmFormatInt32"
-    @unknown default:
-        return "unknown"
-    }
-}
+public typealias AVSPcmCallback = @convention(c) (
+    UnsafeMutableRawPointer?, Double, UInt32, UInt32, UInt, Bool, UnsafeRawPointer?, UnsafePointer<CChar>?
+) -> Bool
+public typealias AVSMarkersCallback = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> Bool
 
-private func avsAudioBufferPayload(
-    from buffer: AVAudioPCMBuffer,
-    isEndOfStream: Bool
-) -> AVSAudioBufferPayload {
-    let audioFileSettingsJson = try? avsJSONString(fromJSONObject: buffer.format.settings)
-    var planesBase64: [String] = []
-
-    if buffer.frameLength > 0 {
-        let audioBuffers = UnsafeMutableAudioBufferListPointer(
-            UnsafeMutablePointer(mutating: buffer.audioBufferList)
-        )
-        for audioBuffer in audioBuffers {
-            guard let data = audioBuffer.mData, audioBuffer.mDataByteSize > 0 else {
-                planesBase64.append(Data().base64EncodedString())
-                continue
-            }
-            let bytes = Data(bytes: data, count: Int(audioBuffer.mDataByteSize))
-            planesBase64.append(bytes.base64EncodedString())
-        }
-    }
-
-    return AVSAudioBufferPayload(
-        sampleRate: buffer.format.sampleRate,
-        channelCount: Int(buffer.format.channelCount),
-        frameLength: Int(buffer.frameLength),
-        commonFormat: avsAudioCommonFormatName(buffer.format.commonFormat),
-        isInterleaved: buffer.format.isInterleaved,
-        planesBase64: planesBase64,
-        audioFileSettingsJson: audioFileSettingsJson,
-        isEndOfStream: isEndOfStream
-    )
-}
-
-private final class AVSCollectedBuffers {
+private final class AVSBufferDelivery {
+    let finished = DispatchSemaphore(value: 0)
     private let lock = NSLock()
-    private var events: [AVSCollectedBufferWriteEvent] = []
+    private let dispatch: () -> Bool
+    private var pending = 0
+    private var draining = false
+    private var closed = false
     private var failure: Error?
-    private var isClosed = false
 
-    var isAccepting: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return !isClosed && failure == nil
+    init(dispatch: @escaping () -> Bool) {
+        self.dispatch = dispatch
     }
 
-    func record(_ event: AVSCollectedBufferWriteEvent) {
+    func deliver(last: Bool = false, _ enqueue: () throws -> Bool) {
         lock.lock()
-        defer { lock.unlock() }
-        guard !isClosed, failure == nil else { return }
-        events.append(event)
+        guard !closed else { lock.unlock(); return }
+        do {
+            guard pending < 64 else { throw AVSBridgeError.io("speech callback queue is full") }
+            guard try enqueue() else { throw AVSBridgeError.io("speech buffer or marker conversion failed") }
+            pending += 1
+            closed = last
+        } catch {
+            failure = error
+            closed = true
+        }
+        guard !draining else { lock.unlock(); return }
+        draining = true
+        while pending > 0 && failure == nil {
+            pending -= 1
+            lock.unlock()
+            let ok = dispatch()
+            lock.lock()
+            if !ok {
+                failure = AVSBridgeError.io("speech callback failed")
+                closed = true
+            }
+        }
+        draining = false
+        let done = closed
+        lock.unlock()
+        if done { finished.signal() }
     }
 
-    func fail(_ error: Error) {
+    func finish() throws {
+        let signaled = avsWaitForSignal(finished, timeoutSeconds: 120)
         lock.lock()
         defer { lock.unlock() }
-        guard !isClosed, failure == nil else { return }
-        failure = error
-    }
-
-    func close() -> (events: [AVSCollectedBufferWriteEvent], failure: Error?) {
-        lock.lock()
-        defer { lock.unlock() }
-        isClosed = true
-        return (events, failure)
+        if !signaled {
+            closed = true
+            if failure == nil { failure = AVSBridgeError.timedOut("speech buffer synthesis timed out") }
+        }
+        if let failure { throw failure }
     }
 }
 
-private func avsCollectUtteranceBuffers(
-    with box: AVSSynthesizerBox,
-    payload: AVSUtterancePayload
-) throws -> AVSCollectedBufferWritePayload {
-    let utterance = try avsUtterance(from: payload)
-    let semaphore = DispatchSemaphore(value: 0)
-    let collected = AVSCollectedBuffers()
-
-    let bridgeBufferCallback: AVSpeechSynthesizer.BufferCallback = { buffer in
-        guard collected.isAccepting else { return }
-        guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
-            collected.fail(AVSBridgeError.io(
-                "AVSpeechSynthesizer emitted a non-PCM audio buffer"
-            ))
-            semaphore.signal()
-            return
-        }
-
-        let isEndOfStream = pcmBuffer.frameLength == 0
-        let payload = avsAudioBufferPayload(from: pcmBuffer, isEndOfStream: isEndOfStream)
-        collected.record(
-            AVSCollectedBufferWriteEvent(
-                kind: .buffer,
-                buffer: payload,
-                markerBatch: nil
-            )
-        )
-        if isEndOfStream {
-            semaphore.signal()
-        }
-    }
-
-    box.synthesizer.write(utterance, toBufferCallback: bridgeBufferCallback) { markers in
-        collected.record(
-            AVSCollectedBufferWriteEvent(
-                kind: .markerBatch,
-                buffer: nil,
-                markerBatch: AVSMarkerBatchPayload(markers: markers.map(avsMarkerPayload))
-            )
-        )
-    }
-
-    let signaled = avsWaitForSignal(semaphore, timeoutSeconds: 120)
-    let result = collected.close()
-    if !signaled {
-        throw AVSBridgeError.timedOut("buffer callback synthesis timed out after 120 seconds")
-    }
-
-    if let capturedError = result.failure {
-        if let bridgeError = capturedError as? AVSBridgeError {
-            throw bridgeError
-        }
-        throw AVSBridgeError.framework(capturedError)
-    }
-
-    return AVSCollectedBufferWritePayload(events: result.events)
-}
-
-@_cdecl("avs_synthesizer_collect_buffers_json")
-public func avs_synthesizer_collect_buffers_json(
+@_cdecl("avs_synthesizer_stream_buffers")
+public func avs_synthesizer_stream_buffers(
     _ token: UnsafeMutableRawPointer?,
     _ utteranceJson: UnsafePointer<CChar>?,
-    _ outResultJson: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>,
+    _ context: UnsafeMutableRawPointer?,
+    _ retain: AVSContextCallback?,
+    _ release: AVSContextCallback?,
+    _ bufferCallback: AVSPcmCallback?,
+    _ markerCallback: AVSMarkersCallback?,
+    _ dispatch: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?,
     _ outErrorMessage: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> Int32 {
     do {
+        guard let bufferCallback, let context, let retain, let release, let dispatch else {
+            throw AVSBridgeError.invalidArgument("missing speech callback or context")
+        }
         let box = try avsSynthesizerBox(token)
-        let payload = try avsDecodeJSON(utteranceJson, as: AVSUtterancePayload.self)
-        let result = try avsCollectUtteranceBuffers(with: box, payload: payload)
-        outResultJson.pointee = avsCString(try avsEncodeJSON(result))
+        let utterance = try avsUtterance(from: avsDecodeJSON(utteranceJson, as: AVSUtterancePayload.self))
+        let owner = AVSContextRetention(context: context, retain: retain, release: release)
+        let delivery = AVSBufferDelivery { dispatch(owner.context) }
+        box.synthesizer.write(utterance, toBufferCallback: { buffer in
+            let pcm = buffer as? AVAudioPCMBuffer
+            delivery.deliver(last: pcm?.frameLength == 0) {
+                guard let pcm else { throw AVSBridgeError.io("speech synthesizer returned a non-PCM buffer") }
+                let format = pcm.format
+                func send(_ settings: UnsafePointer<CChar>?) -> Bool {
+                    bufferCallback(
+                        owner.context, format.sampleRate, format.channelCount, pcm.frameLength,
+                        format.commonFormat.rawValue, format.isInterleaved, pcm.audioBufferList, settings
+                    )
+                }
+                if JSONSerialization.isValidJSONObject(format.settings) {
+                    return try avsJSONString(fromJSONObject: format.settings).withCString(send)
+                }
+                return send(nil)
+            }
+        }, toMarkerCallback: { markers in
+            guard let markerCallback else { return }
+            delivery.deliver {
+                try avsEncodeJSON(markers.map(avsMarkerPayload)).withCString { markerCallback(owner.context, $0) }
+            }
+        })
+        try delivery.finish()
         return AVS_OK
     } catch let error as AVSBridgeError {
         outErrorMessage?.pointee = avsCString(error.description)

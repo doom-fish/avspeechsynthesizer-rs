@@ -274,36 +274,6 @@ struct AVSWriteResultPayload: Codable {
     var markers: [AVSMarkerPayload]
 }
 
-struct AVSAudioBufferPayload: Codable {
-    var sampleRate: Double
-    var channelCount: Int
-    var frameLength: Int
-    var commonFormat: String
-    var isInterleaved: Bool
-    var planesBase64: [String]
-    var audioFileSettingsJson: String?
-    var isEndOfStream: Bool
-}
-
-struct AVSMarkerBatchPayload: Codable {
-    var markers: [AVSMarkerPayload]
-}
-
-enum AVSCollectedBufferWriteEventKind: String, Codable {
-    case buffer
-    case markerBatch
-}
-
-struct AVSCollectedBufferWriteEvent: Codable {
-    var kind: AVSCollectedBufferWriteEventKind
-    var buffer: AVSAudioBufferPayload?
-    var markerBatch: AVSMarkerBatchPayload?
-}
-
-struct AVSCollectedBufferWritePayload: Codable {
-    var events: [AVSCollectedBufferWriteEvent]
-}
-
 struct AVSProviderVoicePayload: Codable {
     var name: String
     var identifier: String

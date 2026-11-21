@@ -1,5 +1,6 @@
-use std::path::PathBuf;
-use std::process::Command;
+#[path = "../examples/02_framework_smoke.rs"]
+mod framework_smoke;
+
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -85,12 +86,5 @@ fn framework_smoke_example_speaks_aloud() -> Result<(), Box<dyn std::error::Erro
         return Ok(());
     }
 
-    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join("debug")
-        .join("examples")
-        .join("02_framework_smoke");
-    let status = Command::new(example).status()?;
-    assert!(status.success());
-    Ok(())
+    framework_smoke::main()
 }

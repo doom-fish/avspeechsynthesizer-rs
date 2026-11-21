@@ -51,6 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `AVSpeechSynthesizer` delivers its delegate events and the audio-buffer callbacks behind `write_utterance_to_file` and `write_utterance_with_*` on the main thread, whichever thread owns the synthesizer. Call these from the main thread and pump its run loop (`SpeechSynthesizer::pump_run_loop`), or run an app event loop. Otherwise events never arrive and the write calls fail with `AvSpeechError::TimedOut` after 120 seconds.
 
+The buffer APIs deliver owned PCM planes and marker batches during synthesis. They return after the end-of-stream callback. Concurrent or reentrant delivery preserves arrival order. If 64 events await delivery, the operation returns an error instead of accumulating the utterance.
+
+`write_utterance_to_file` replaces the destination only after synthesis succeeds and the audio file closes. It rejects directories and preserves the previous file on failure.
+
 ## Async API
 
 Enable the `async` feature for `async_api::SpeechSynthesisEventStream`, an executor-agnostic stream of delegate events. The handler from `set_event_handler` and any number of streams receive every event side by side; dropping a stream removes only that stream, and dropping the synthesizer ends its streams once their buffered events are drained. The buffer drops its oldest event when it is full, and a capacity of zero is rejected with `AvSpeechError::InvalidArgument`.

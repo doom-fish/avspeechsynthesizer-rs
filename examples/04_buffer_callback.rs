@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_frames = *total_frames.lock().map_err(|_| "frames mutex poisoned")?;
     let saw_end = *saw_end.lock().map_err(|_| "end mutex poisoned")?;
     println!("buffer callback frames={total_frames} saw_end={saw_end}");
+    assert!(total_frames > 0, "expected at least one audio frame");
     assert!(saw_end, "expected an end-of-stream buffer");
     Ok(())
 }

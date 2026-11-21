@@ -1,5 +1,6 @@
 use core::ffi::{c_char, c_void, CStr};
 use core::ptr;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
@@ -7,9 +8,7 @@ use std::time::Duration;
 use doom_fish_utils::callback_context::CallbackContext;
 use serde::Deserialize;
 
-use crate::buffer_callback::{
-    CollectedBufferWriteEventKind, CollectedBufferWritePayload, SpeechAudioBuffer,
-};
+use crate::buffer_callback::SpeechAudioBuffer;
 use crate::error::AvSpeechError;
 use crate::ffi;
 use crate::marker::{MarkerPayload, SpeechSynthesisMarker, TextRange};
@@ -134,6 +133,13 @@ impl EventHandlerBox {
 struct WriteCallbackBox {
     buffer_handler: Mutex<BufferHandler>,
     marker_handler: Option<Mutex<MarkerHandler>>,
+    pending: Mutex<VecDeque<WriteEvent>>,
+    error: Mutex<Option<AvSpeechError>>,
+}
+
+enum WriteEvent {
+    Buffer(SpeechAudioBuffer),
+    Markers(Vec<SpeechSynthesisMarker>),
 }
 
 impl WriteCallbackBox {
@@ -144,6 +150,8 @@ impl WriteCallbackBox {
         Self {
             buffer_handler: Mutex::new(Box::new(callback)),
             marker_handler: None,
+            pending: Mutex::default(),
+            error: Mutex::default(),
         }
     }
 
@@ -155,6 +163,8 @@ impl WriteCallbackBox {
         Self {
             buffer_handler: Mutex::new(Box::new(buffer_callback)),
             marker_handler: Some(Mutex::new(Box::new(marker_callback))),
+            pending: Mutex::default(),
+            error: Mutex::default(),
         }
     }
 
@@ -184,6 +194,93 @@ impl WriteCallbackBox {
             handler(markers);
         }
     }
+
+    fn enqueue(&self, event: Result<WriteEvent, AvSpeechError>) -> bool {
+        match event {
+            Ok(event) => {
+                self.pending
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push_back(event);
+                true
+            }
+            Err(error) => {
+                *self
+                    .error
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                false
+            }
+        }
+    }
+}
+
+type WriteContext = CallbackContext<WriteCallbackBox>;
+
+unsafe extern "C" fn stream_buffer(
+    context: *mut c_void,
+    rate: f64,
+    channels: u32,
+    frames: u32,
+    format: usize,
+    interleaved: bool,
+    list: *const ffi::buffer_callback::AudioPlaneList,
+    settings: *const c_char,
+) -> bool {
+    unsafe {
+        WriteContext::with(context, "speech buffer", |callbacks| {
+            callbacks.enqueue(
+                SpeechAudioBuffer::from_native(
+                    rate,
+                    channels,
+                    frames,
+                    format,
+                    interleaved,
+                    list,
+                    settings,
+                )
+                .map(WriteEvent::Buffer),
+            )
+        })
+    }
+    .unwrap_or(false)
+}
+
+unsafe extern "C" fn stream_markers(context: *mut c_void, json: *const c_char) -> bool {
+    if json.is_null() {
+        return false;
+    }
+    unsafe {
+        WriteContext::with(context, "speech markers", |callbacks| {
+            callbacks.enqueue(
+                serde_json::from_slice::<Vec<MarkerPayload>>(CStr::from_ptr(json).to_bytes())
+                    .map(|markers| {
+                        WriteEvent::Markers(markers.into_iter().map(Into::into).collect())
+                    })
+                    .map_err(|error| AvSpeechError::Io(format!("invalid speech markers: {error}"))),
+            )
+        })
+    }
+    .unwrap_or(false)
+}
+
+unsafe extern "C" fn dispatch_write_event(context: *mut c_void) -> bool {
+    unsafe {
+        WriteContext::with(context, "speech event delivery", |callbacks| {
+            let event = callbacks
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pop_front();
+            match event {
+                Some(WriteEvent::Buffer(buffer)) => callbacks.dispatch_buffer(buffer),
+                Some(WriteEvent::Markers(markers)) => callbacks.dispatch_markers(markers),
+                None => return false,
+            }
+            true
+        })
+    }
+    .unwrap_or(false)
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,7 +433,7 @@ impl SpeechSynthesizer {
         F: FnMut(SpeechAudioBuffer) + Send + 'static,
     {
         let callbacks = WriteCallbackBox::with_buffer(buffer_callback);
-        self.write_utterance_with_callback_box(utterance, &callbacks)
+        self.write_utterance_with_callback_box(utterance, callbacks)
     }
 
     /// Streams AVSpeechSynthesis audio buffers and markers for an utterance.
@@ -351,47 +448,44 @@ impl SpeechSynthesizer {
         G: FnMut(Vec<SpeechSynthesisMarker>) + Send + 'static,
     {
         let callbacks = WriteCallbackBox::with_callbacks(buffer_callback, marker_callback);
-        self.write_utterance_with_callback_box(utterance, &callbacks)
+        self.write_utterance_with_callback_box(utterance, callbacks)
     }
 
     fn write_utterance_with_callback_box(
         &self,
         utterance: &SpeechUtterance,
-        callbacks: &WriteCallbackBox,
+        callbacks: WriteCallbackBox,
     ) -> Result<(), AvSpeechError> {
         let utterance_json = json_cstring(&UtterancePayload::from(utterance))?;
-        let mut result_json: *mut c_char = ptr::null_mut();
+        let want_markers = callbacks.marker_handler.is_some();
+        let callbacks = WriteContext::new(callbacks);
         let mut err_msg: *mut c_char = ptr::null_mut();
         let status = unsafe {
-            ffi::buffer_callback::avs_synthesizer_collect_buffers_json(
+            ffi::buffer_callback::avs_synthesizer_stream_buffers(
                 self.token,
                 utterance_json.as_ptr(),
-                &raw mut result_json,
+                callbacks.as_ptr(),
+                WriteContext::RETAIN,
+                WriteContext::RELEASE,
+                stream_buffer,
+                if want_markers {
+                    Some(stream_markers)
+                } else {
+                    None
+                },
+                dispatch_write_event,
                 &raw mut err_msg,
             )
         };
         if status != ffi::status::OK {
-            return Err(unsafe { error_from_status(status, err_msg) });
-        }
-
-        let payload: CollectedBufferWritePayload =
-            unsafe { parse_json_ptr(result_json, "collected speech audio buffers") }?;
-        for event in payload.events {
-            match event.kind {
-                CollectedBufferWriteEventKind::Buffer => {
-                    if let Some(buffer) = event
-                        .buffer
-                        .and_then(|value| SpeechAudioBuffer::try_from(value).ok())
-                    {
-                        callbacks.dispatch_buffer(buffer);
-                    }
-                }
-                CollectedBufferWriteEventKind::MarkerBatch => {
-                    if let Some(marker_batch) = event.marker_batch {
-                        callbacks.dispatch_markers(marker_batch.into());
-                    }
-                }
-            }
+            let error = unsafe { error_from_status(status, err_msg) };
+            return Err(callbacks
+                .get()
+                .error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+                .unwrap_or(error));
         }
         Ok(())
     }

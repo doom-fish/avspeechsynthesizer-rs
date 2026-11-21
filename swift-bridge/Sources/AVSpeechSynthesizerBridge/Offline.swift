@@ -1,4 +1,5 @@
 import AVFAudio
+import Darwin
 import Foundation
 
 private struct AVSOfflineWriteOutcome {
@@ -71,19 +72,21 @@ private func avsWriteUtterance(
     outputPath: String
 ) throws -> AVSWriteResultPayload {
     let outputURL = URL(fileURLWithPath: outputPath)
-    if FileManager.default.fileExists(atPath: outputPath) {
-        do {
-            try FileManager.default.removeItem(at: outputURL)
-        } catch {
-            throw AVSBridgeError.io(
-                "failed to remove existing output file: \(error.localizedDescription)"
-            )
-        }
-    }
-
     let utterance = try avsUtterance(from: payload)
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: outputPath, isDirectory: &isDirectory), isDirectory.boolValue {
+        throw AVSBridgeError.io("the audio destination is a directory")
+    }
+    let staging = try FileManager.default.url(
+        for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: outputURL, create: true
+    )
+    let recording = staging.appendingPathComponent(outputURL.lastPathComponent)
+    defer {
+        _ = unlink(recording.path)
+        _ = rmdir(staging.path)
+    }
     let semaphore = DispatchSemaphore(value: 0)
-    let write = AVSOfflineWrite(outputURL: outputURL)
+    let write = AVSOfflineWrite(outputURL: recording)
 
     let bufferCallback: AVSpeechSynthesizer.BufferCallback = { buffer in
         if write.handle(buffer) {
@@ -110,6 +113,9 @@ private func avsWriteUtterance(
         throw AVSBridgeError.unknown(
             "offline synthesis ended without an end-of-stream buffer"
         )
+    }
+    guard rename(recording.path, outputURL.path) == 0 else {
+        throw AVSBridgeError.io("could not install the audio file: \(String(cString: strerror(errno)))")
     }
 
     return AVSWriteResultPayload(
